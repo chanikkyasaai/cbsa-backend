@@ -1,31 +1,92 @@
 {
   "eventFlowMap": {
+    "PAGE_NAVIGATION_EVENTS": {
+      "PAGE_ENTER_HOME": {
+        "description": "Entering Home/Dashboard tab",
+        "screen": "dashboard",
+        "nextEvents": ["TOUCH_TAB_ACCOUNTS", "TOUCH_TAB_SAVE", "TOUCH_TAB_INVEST", "TOUCH_TAB_BORROW", "TOUCH_TAB_SHOP_PAY", "SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16", "TOUCH_SEARCH", "TOUCH_PROFILE"]
+      },
+      "PAGE_ENTER_CARDS": {
+        "description": "Entering Cards tab",
+        "screen": "cards",
+        "nextEvents": ["TOUCH_CARD_TAB_DEBIT_CARDS", "TOUCH_CARD_TAB_CREDIT_CARD", "TOUCH_CARD_TAB_WEARABLE", "SCROLL_CARDS", "TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_1", "TOUCH_CARD_ACTION_2", "TOUCH_CARD_ACTION_3", "TOUCH_CARD_ACTION_4", "TOUCH_CARD_ACTION_5", "TOUCH_CARD_ACTION_6", "TOUCH_APPLY_DEBIT_CARD", "TOUCH_SEARCH", "TOUCH_PROFILE"]
+      },
+      "PAGE_ENTER_MORE": {
+        "description": "Entering More/Explore tab",
+        "screen": "more",
+        "nextEvents": ["SCROLL_MORE_TAB", "TOUCH_QUICK_1", "TOUCH_QUICK_2", "TOUCH_QUICK_3", "TOUCH_QUICK_4", "TOUCH_EXPLORE_1", "TOUCH_EXPLORE_2", "TOUCH_EXPLORE_3", "TOUCH_EXPLORE_4", "TOUCH_EXPLORE_5", "TOUCH_EXPLORE_6", "TOUCH_EXPLORE_7", "TOUCH_EXPLORE_8", "TOUCH_EXPLORE_9", "TOUCH_EXPLORE_10", "TOUCH_EXPLORE_11", "TOUCH_EXPLORE_12", "TOUCH_EXPLORE_13", "TOUCH_EXPLORE_14", "TOUCH_APPLY_1", "TOUCH_APPLY_2", "TOUCH_APPLY_3", "TOUCH_APPLY_4", "TOUCH_APPLY_5", "TOUCH_APPLY_6", "TOUCH_APPLY_7", "TOUCH_APPLY_8", "TOUCH_APPLY_9", "TOUCH_APPLY_10", "TOUCH_APPLY_11", "TOUCH_APPLY_12", "TOUCH_APPLY_13", "TOUCH_APPLY_14", "TOUCH_APPLY_15", "TOUCH_APPLY_16", "TOUCH_SEARCH", "TOUCH_PROFILE"]
+      },
+      "PAGE_ENTER_PAY": {
+        "description": "Entering Pay tab",
+        "screen": "pay",
+        "nextEvents": ["SCROLL_PAY", "PAY_RECIPIENT", "PAY_AMOUNT", "PAY_BUTTON_1", "PAY_BUTTON_2", "TOUCH_PAY_BACK", "TOUCH_SEARCH", "TOUCH_PROFILE"]
+      },
+      "PAGE_ENTER_PROFILE": {
+        "description": "Entering Profile tab",
+        "screen": "profile",
+        "nextEvents": ["TOUCH_CHANGE_PIN", "TOUCH_LOGOUT", "TOUCH_SEARCH", "TOUCH_PROFILE"]
+      },
+      "PAGE_ENTER_ACCOUNT": {
+        "description": "Entering Account detail screen",
+        "screen": "account",
+        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_1", "TOUCH_MENU_2", "TOUCH_MENU_3", "TOUCH_MENU_4", "TOUCH_MENU_5", "TOUCH_MENU_6", "TOUCH_MENU_7", "TOUCH_BOTTOM_1", "TOUCH_BOTTOM_2", "TOUCH_BOTTOM_3", "TOUCH_LOGOUT"]
+      },
+      "PAGE_ENTER_PIN_CHANGE": {
+        "description": "Entering PIN change flow",
+        "screen": "pin-change",
+        "nextEvents": ["TYPE_PIN_STEP_1", "TYPE_PIN_STEP_2", "TYPE_PIN_STEP_3", "TOUCH_VERIFY_OLD_PIN", "TOUCH_SET_NEW_PIN", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_PIN_STEP_1_NEXT", "TOUCH_PIN_STEP_2_NEXT", "TOUCH_PIN_STEP_3_NEXT", "TOUCH_BACK_PIN_CHANGE"]
+      }
+    },
+
     "HEADER_EVENTS": {
       "TOUCH_SEARCH": {
-        "description": "Header search icon - stays on same screen",
+        "description": "Header search icon - stays on current screen",
+        "nextEvents": ["KEYSTROKE_SEARCH"]
+      },
+      "KEYSTROKE_SEARCH": {
+        "description": "Typing in search field",
+        "nextEvents": ["KEYSTROKE_SEARCH", "TOUCH_SEARCH_RESULT"]
+      },
+      "TOUCH_SEARCH_RESULT": {
+        "description": "Tapping search result - stays on current screen or navigates",
         "nextEvents": []
       },
       "TOUCH_PROFILE": {
         "description": "Header profile icon - navigates to account screen",
         "navigatesTo": "account",
-        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+        "nextEvents": ["PAGE_ENTER_ACCOUNT"]
       }
     },
 
     "DASHBOARD_SCREEN": {
-      "TOUCH_TAB_*": {
-        "description": "Horizontal tabs: ACCOUNTS, SAVE, INVEST, BORROW, SHOP & PAY",
-        "pattern": "TOUCH_TAB_{ACCOUNTS|SAVE|INVEST|BORROW|SHOP & PAY}",
-        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_*"]
+      "TOUCH_TAB_ACCOUNTS": {
+        "description": "Tab: Accounts",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_TAB_SAVE": {
+        "description": "Tab: Save",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_TAB_INVEST": {
+        "description": "Tab: Invest",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_TAB_BORROW": {
+        "description": "Tab: Borrow",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_TAB_SHOP_PAY": {
+        "description": "Tab: Shop & Pay",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
       },
       "SCROLL_DASHBOARD": {
         "description": "Scrolling on dashboard",
-        "nextEvents": ["TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_*"]
+        "nextEvents": ["TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
       },
       "TOUCH_BALANCE_CARD": {
         "description": "Balance card - navigates to account screen",
         "navigatesTo": "account",
-        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+        "nextEvents": ["PAGE_ENTER_ACCOUNT"]
       },
       "TOUCH_BALANCE_TOGGLE": {
         "description": "Show/hide balance - stays on dashboard",
@@ -34,51 +95,99 @@
       "TOUCH_VIEW_ACCOUNTS": {
         "description": "View accounts link - navigates to account screen",
         "navigatesTo": "account",
-        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+        "nextEvents": ["PAGE_ENTER_ACCOUNT"]
       },
       "TOUCH_TRANSACTION_HISTORY": {
-        "description": "Transaction history - navigates to explore/more screen",
-        "navigatesTo": "explore",
-        "nextEvents": ["SCROLL_MORE_TAB", "TOUCH_QUICK_*", "TOUCH_EXPLORE_*", "TOUCH_APPLY_*"]
+        "description": "Transaction history - navigates to more screen",
+        "navigatesTo": "more",
+        "nextEvents": ["PAGE_ENTER_MORE"]
       },
       "TOUCH_TRENDING_TOGGLE": {
         "description": "Expand/collapse trending section",
-        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_*"]
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
       },
-      "TOUCH_SERVICE_*": {
-        "description": "Service icons (1-16) - no modal, just icon tap",
-        "pattern": "TOUCH_SERVICE_{1-16}",
-        "items": {
-          "1": "Fund transfer",
-          "2": "Fixed/Systematic Deposit Plan",
-          "3": "Periodic updation of KYC(Re-KYC)",
-          "4": "Forex (NEW)",
-          "5": "Apply IPO",
-          "6": "Digital loan",
-          "7": "Mutual funds",
-          "8": "Brands2You",
-          "9": "Healthcare Services",
-          "10": "Xplore the Globe",
-          "11": "Credit score (Free)",
-          "12": "Mobile recharge",
-          "13": "Flight booking",
-          "14": "Bus booking",
-          "15": "Train booking",
-          "16": "Send money abroad"
-        },
-        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_*"]
+      "TOUCH_SERVICE_1": {
+        "description": "Fund transfer",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_2": {
+        "description": "Fixed/Systematic Deposit Plan",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_3": {
+        "description": "Periodic updation of KYC (Re-KYC)",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_4": {
+        "description": "Forex",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_5": {
+        "description": "Apply IPO",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_6": {
+        "description": "Digital loan",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_7": {
+        "description": "Mutual funds",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_8": {
+        "description": "Brands2You",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_9": {
+        "description": "Healthcare Services",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_10": {
+        "description": "Xplore the Globe",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_11": {
+        "description": "Credit score (Free)",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_12": {
+        "description": "Mobile recharge",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_13": {
+        "description": "Flight booking",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_14": {
+        "description": "Bus booking",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_15": {
+        "description": "Train booking",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
+      },
+      "TOUCH_SERVICE_16": {
+        "description": "Send money abroad",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_1", "TOUCH_SERVICE_2", "TOUCH_SERVICE_3", "TOUCH_SERVICE_4", "TOUCH_SERVICE_5", "TOUCH_SERVICE_6", "TOUCH_SERVICE_7", "TOUCH_SERVICE_8", "TOUCH_SERVICE_9", "TOUCH_SERVICE_10", "TOUCH_SERVICE_11", "TOUCH_SERVICE_12", "TOUCH_SERVICE_13", "TOUCH_SERVICE_14", "TOUCH_SERVICE_15", "TOUCH_SERVICE_16"]
       }
     },
 
     "CARDS_SCREEN": {
-      "TOUCH_CARD_TAB_*": {
-        "description": "Card type tabs",
-        "pattern": "TOUCH_CARD_TAB_{DEBIT CARDS|CREDIT CARD|WEARABLE}",
-        "nextEvents": ["SCROLL_CARDS", "TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_*", "TOUCH_APPLY_DEBIT_CARD"]
+      "TOUCH_CARD_TAB_DEBIT_CARDS": {
+        "description": "Card tab: Debit Cards",
+        "nextEvents": ["SCROLL_CARDS", "TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_1", "TOUCH_CARD_ACTION_2", "TOUCH_CARD_ACTION_3", "TOUCH_CARD_ACTION_4", "TOUCH_CARD_ACTION_5", "TOUCH_CARD_ACTION_6", "TOUCH_APPLY_DEBIT_CARD"]
+      },
+      "TOUCH_CARD_TAB_CREDIT_CARD": {
+        "description": "Card tab: Credit Card",
+        "nextEvents": ["SCROLL_CARDS", "TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_1", "TOUCH_CARD_ACTION_2", "TOUCH_CARD_ACTION_3", "TOUCH_CARD_ACTION_4", "TOUCH_CARD_ACTION_5", "TOUCH_CARD_ACTION_6", "TOUCH_APPLY_DEBIT_CARD"]
+      },
+      "TOUCH_CARD_TAB_WEARABLE": {
+        "description": "Card tab: Wearable",
+        "nextEvents": ["SCROLL_CARDS", "TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_1", "TOUCH_CARD_ACTION_2", "TOUCH_CARD_ACTION_3", "TOUCH_CARD_ACTION_4", "TOUCH_CARD_ACTION_5", "TOUCH_CARD_ACTION_6", "TOUCH_APPLY_DEBIT_CARD"]
       },
       "SCROLL_CARDS": {
         "description": "Scrolling on cards screen",
-        "nextEvents": ["TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_*", "TOUCH_APPLY_DEBIT_CARD"]
+        "nextEvents": ["TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_1", "TOUCH_CARD_ACTION_2", "TOUCH_CARD_ACTION_3", "TOUCH_CARD_ACTION_4", "TOUCH_CARD_ACTION_5", "TOUCH_CARD_ACTION_6", "TOUCH_APPLY_DEBIT_CARD"]
       },
       "TOUCH_ACTIVE_CHANNELS": {
         "description": "Expand active channels section",
@@ -96,28 +205,33 @@
         "description": "Block card button",
         "nextEvents": ["SCROLL_CARDS"]
       },
-      "TOUCH_CARD_ACTION_*": {
-        "description": "Card action items (1-6)",
-        "pattern": "TOUCH_CARD_ACTION_{1-6}",
-        "items": {
-          "1": "Manage",
-          "2": "Set PIN",
-          "3": "Link card for QR payments",
-          "4": "Manage tokens",
-          "5": "View wallet balance",
-          "6": "Load money"
-        },
-        "nextEvents": ["SCROLL_CARDS"],
-        "specialCase": {
-          "TOUCH_CARD_ACTION_2": {
-            "description": "Set PIN - navigates to PIN change flow",
-            "navigatesTo": "pin-change",
-            "nextEvents": ["TOUCH_VERIFY_OLD_PIN", "TOUCH_BACK_PIN_CHANGE"]
-          }
-        }
+      "TOUCH_CARD_ACTION_1": {
+        "description": "Card action: Manage",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_CARD_ACTION_2": {
+        "description": "Card action: Set PIN - navigates to PIN change",
+        "navigatesTo": "pin-change",
+        "nextEvents": ["PAGE_ENTER_PIN_CHANGE"]
+      },
+      "TOUCH_CARD_ACTION_3": {
+        "description": "Card action: Link card for QR payments",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_CARD_ACTION_4": {
+        "description": "Card action: Manage tokens",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_CARD_ACTION_5": {
+        "description": "Card action: View wallet balance",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_CARD_ACTION_6": {
+        "description": "Card action: Load money",
+        "nextEvents": ["SCROLL_CARDS"]
       },
       "TOUCH_APPLY_DEBIT_CARD": {
-        "description": "Apply for card button",
+        "description": "Apply for debit card",
         "nextEvents": ["SCROLL_CARDS"]
       }
     },
@@ -125,131 +239,206 @@
     "MORE_SCREEN": {
       "SCROLL_MORE_TAB": {
         "description": "Scrolling on More tab",
-        "nextEvents": ["TOUCH_QUICK_*", "TOUCH_EXPLORE_*", "TOUCH_APPLY_*"]
+        "nextEvents": ["TOUCH_QUICK_1", "TOUCH_QUICK_2", "TOUCH_QUICK_3", "TOUCH_QUICK_4", "TOUCH_EXPLORE_1", "TOUCH_EXPLORE_2", "TOUCH_EXPLORE_3", "TOUCH_EXPLORE_4", "TOUCH_EXPLORE_5", "TOUCH_EXPLORE_6", "TOUCH_EXPLORE_7", "TOUCH_EXPLORE_8", "TOUCH_EXPLORE_9", "TOUCH_EXPLORE_10", "TOUCH_EXPLORE_11", "TOUCH_EXPLORE_12", "TOUCH_EXPLORE_13", "TOUCH_EXPLORE_14", "TOUCH_APPLY_1", "TOUCH_APPLY_2", "TOUCH_APPLY_3", "TOUCH_APPLY_4", "TOUCH_APPLY_5", "TOUCH_APPLY_6", "TOUCH_APPLY_7", "TOUCH_APPLY_8", "TOUCH_APPLY_9", "TOUCH_APPLY_10", "TOUCH_APPLY_11", "TOUCH_APPLY_12", "TOUCH_APPLY_13", "TOUCH_APPLY_14", "TOUCH_APPLY_15", "TOUCH_APPLY_16"]
       },
-      "TOUCH_QUICK_*": {
-        "description": "Quick actions section (1-4)",
-        "pattern": "TOUCH_QUICK_{1-4}",
-        "items": {
-          "1": "Debit card block",
-          "2": "Stop cheque",
-          "3": "Transaction history",
-          "4": "Generate MMID"
-        },
-        "nextEvents": ["SCROLL_MORE_TAB"],
-        "specialCase": {
-          "TOUCH_QUICK_3": {
-            "description": "Transaction history - navigates to transaction screen",
-            "navigatesTo": "transaction",
-            "nextEvents": ["TOUCH_BACK"]
-          }
-        }
+      "TOUCH_QUICK_1": {
+        "description": "Quick action: Debit card block",
+        "nextEvents": ["SCROLL_MORE_TAB"]
       },
-      "TOUCH_EXPLORE_*": {
-        "description": "Explore section (1-14)",
-        "pattern": "TOUCH_EXPLORE_{1-14}",
-        "items": {
-          "1": "My account",
-          "2": "My favorites",
-          "3": "Passbook",
-          "4": "Request services",
-          "5": "Fund transfer",
-          "6": "Recharge & bill Pay",
-          "7": "Cash on mobile",
-          "8": "Baroda FASTag",
-          "9": "Fixed/Systematic Deposit Plan",
-          "10": "Investment",
-          "11": "Digital loan",
-          "12": "Shop",
-          "13": "Invite & earn",
-          "14": "Currency converter"
-        },
-        "nextEvents": ["SCROLL_MORE_TAB"],
-        "specialCase": {
-          "TOUCH_EXPLORE_1": {
-            "description": "My account - navigates to account screen",
-            "navigatesTo": "account",
-            "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
-          }
-        }
+      "TOUCH_QUICK_2": {
+        "description": "Quick action: Stop cheque",
+        "nextEvents": ["SCROLL_MORE_TAB"]
       },
-      "TOUCH_APPLY_*": {
-        "description": "Apply for section (1-16)",
-        "pattern": "TOUCH_APPLY_{1-16}",
-        "items": {
-          "1": "Mudra loan",
-          "2": "MSME loan",
-          "3": "Home loan",
-          "4": "Car loan",
-          "5": "Digital BKCC loan",
-          "6": "Locker",
-          "7": "Life insurance",
-          "8": "Motor insurance",
-          "9": "Health insurance",
-          "10": "Travel insurance",
-          "11": "Property insurance",
-          "12": "bob credit card",
-          "13": "Agriculture loan",
-          "14": "KVP account",
-          "15": "SCSS account",
-          "16": "TDS/TCS certificate"
-        },
+      "TOUCH_QUICK_3": {
+        "description": "Quick action: Transaction history - navigates to transaction screen",
+        "navigatesTo": "transaction",
+        "nextEvents": ["TOUCH_BACK"]
+      },
+      "TOUCH_QUICK_4": {
+        "description": "Quick action: Generate MMID",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_1": {
+        "description": "Explore: My account - navigates to account screen",
+        "navigatesTo": "account",
+        "nextEvents": ["PAGE_ENTER_ACCOUNT"]
+      },
+      "TOUCH_EXPLORE_2": {
+        "description": "Explore: My favorites",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_3": {
+        "description": "Explore: Passbook",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_4": {
+        "description": "Explore: Request services",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_5": {
+        "description": "Explore: Fund transfer",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_6": {
+        "description": "Explore: Recharge & bill Pay",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_7": {
+        "description": "Explore: Cash on mobile",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_8": {
+        "description": "Explore: Baroda FASTag",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_9": {
+        "description": "Explore: Fixed/Systematic Deposit Plan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_10": {
+        "description": "Explore: Investment",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_11": {
+        "description": "Explore: Digital loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_12": {
+        "description": "Explore: Shop",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_13": {
+        "description": "Explore: Invite & earn",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_EXPLORE_14": {
+        "description": "Explore: Currency converter",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_1": {
+        "description": "Apply: Mudra loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_2": {
+        "description": "Apply: MSME loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_3": {
+        "description": "Apply: Home loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_4": {
+        "description": "Apply: Car loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_5": {
+        "description": "Apply: Digital BKCC loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_6": {
+        "description": "Apply: Locker",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_7": {
+        "description": "Apply: Life insurance",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_8": {
+        "description": "Apply: Motor insurance",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_9": {
+        "description": "Apply: Health insurance",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_10": {
+        "description": "Apply: Travel insurance",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_11": {
+        "description": "Apply: Property insurance",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_12": {
+        "description": "Apply: BOB credit card",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_13": {
+        "description": "Apply: Agriculture loan",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_14": {
+        "description": "Apply: KVP account",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_15": {
+        "description": "Apply: SCSS account",
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      },
+      "TOUCH_APPLY_16": {
+        "description": "Apply: TDS/TCS certificate",
         "nextEvents": ["SCROLL_MORE_TAB"]
       }
     },
 
     "ACCOUNT_SCREEN": {
-      "TOUCH_BACK": {
-        "description": "Back button - returns to previous screen",
-        "nextEvents": ["SCROLL_DASHBOARD", "SCROLL_CARDS", "SCROLL_MORE_TAB"]
-      },
       "SCROLL_PROFILE": {
         "description": "Scrolling on account screen",
-        "nextEvents": ["TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+        "nextEvents": ["TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_1", "TOUCH_MENU_2", "TOUCH_MENU_3", "TOUCH_MENU_4", "TOUCH_MENU_5", "TOUCH_MENU_6", "TOUCH_MENU_7", "TOUCH_BOTTOM_1", "TOUCH_BOTTOM_2", "TOUCH_BOTTOM_3", "TOUCH_LOGOUT"]
       },
       "TOUCH_GET_CREDIT_SCORE": {
         "description": "Get latest credit score button",
         "nextEvents": ["SCROLL_PROFILE"]
       },
-      "TOUCH_MENU_*": {
-        "description": "Menu items (1-7)",
-        "pattern": "TOUCH_MENU_{1-7}",
-        "items": {
-          "1": "KYC/CKYC Details",
-          "2": "Customer profile updation",
-          "3": "Contact details",
-          "4": "Change login PIN",
-          "5": "Change transaction PIN",
-          "6": "Switch to Classic",
-          "7": "Digital planner"
-        },
-        "nextEvents": ["SCROLL_PROFILE"],
-        "specialCase": {
-          "TOUCH_MENU_4": {
-            "description": "Change login PIN - navigates to PIN change",
-            "navigatesTo": "pin-change",
-            "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_BACK_PIN_CHANGE"]
-          },
-          "TOUCH_MENU_5": {
-            "description": "Change transaction PIN - navigates to PIN change",
-            "navigatesTo": "pin-change",
-            "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_BACK_PIN_CHANGE"]
-          }
-        }
+      "TOUCH_MENU_1": {
+        "description": "Menu: KYC/CKYC Details",
+        "nextEvents": ["SCROLL_PROFILE"]
       },
-      "TOUCH_BOTTOM_*": {
-        "description": "Bottom action items (1-3)",
-        "pattern": "TOUCH_BOTTOM_{1-3}",
-        "items": {
-          "1": "Alerts & notifications",
-          "2": "App settings",
-          "3": "Need help"
-        },
+      "TOUCH_MENU_2": {
+        "description": "Menu: Customer profile updation",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_MENU_3": {
+        "description": "Menu: Contact details",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_MENU_4": {
+        "description": "Menu: Change login PIN - navigates to PIN change",
+        "navigatesTo": "pin-change",
+        "nextEvents": ["PAGE_ENTER_PIN_CHANGE"]
+      },
+      "TOUCH_MENU_5": {
+        "description": "Menu: Change transaction PIN - navigates to PIN change",
+        "navigatesTo": "pin-change",
+        "nextEvents": ["PAGE_ENTER_PIN_CHANGE"]
+      },
+      "TOUCH_MENU_6": {
+        "description": "Menu: Switch to Classic",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_MENU_7": {
+        "description": "Menu: Digital planner",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_BOTTOM_1": {
+        "description": "Bottom action: Alerts & notifications",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_BOTTOM_2": {
+        "description": "Bottom action: App settings",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_BOTTOM_3": {
+        "description": "Bottom action: Need help",
         "nextEvents": ["SCROLL_PROFILE"]
       },
       "TOUCH_LOGOUT": {
         "description": "Logout - ends session",
         "nextEvents": []
+      },
+      "TOUCH_BACK": {
+        "description": "Back button - returns to previous screen",
+        "nextEvents": ["PAGE_ENTER_HOME", "PAGE_ENTER_CARDS", "PAGE_ENTER_MORE", "PAGE_ENTER_PAY", "PAGE_ENTER_PROFILE"]
       }
     },
 
@@ -257,7 +446,7 @@
       "TOUCH_CHANGE_PIN": {
         "description": "Change PIN button - navigates to PIN change",
         "navigatesTo": "pin-change",
-        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_BACK_PIN_CHANGE"]
+        "nextEvents": ["PAGE_ENTER_PIN_CHANGE"]
       },
       "TOUCH_LOGOUT": {
         "description": "Logout button - ends session",
@@ -268,80 +457,99 @@
     "PAY_SCREEN": {
       "SCROLL_PAY": {
         "description": "Scrolling on pay screen",
-        "nextEvents": ["KEYSTROKE_PAY_RECIPIENT", "KEYSTROKE_PAY_AMOUNT", "TOUCH_PAY_BUTTON"]
+        "nextEvents": ["PAY_RECIPIENT", "PAY_AMOUNT", "PAY_BUTTON_1", "PAY_BUTTON_2"]
       },
-      "KEYSTROKE_PAY_RECIPIENT": {
-        "description": "Typing in recipient field (Step 1)",
-        "nextEvents": ["KEYSTROKE_PAY_RECIPIENT", "KEYSTROKE_PAY_AMOUNT", "TOUCH_PAY_BUTTON"]
+      "PAY_RECIPIENT": {
+        "description": "Typing in recipient field",
+        "nextEvents": ["PAY_RECIPIENT", "PAY_AMOUNT", "PAY_BUTTON_1"]
       },
-      "KEYSTROKE_PAY_AMOUNT": {
-        "description": "Typing in amount field (Step 1)",
-        "nextEvents": ["KEYSTROKE_PAY_RECIPIENT", "KEYSTROKE_PAY_AMOUNT", "TOUCH_PAY_BUTTON"]
+      "PAY_AMOUNT": {
+        "description": "Typing in amount field",
+        "nextEvents": ["PAY_RECIPIENT", "PAY_AMOUNT", "PAY_BUTTON_1"]
       },
-      "TOUCH_PAY_BUTTON": {
-        "description": "NEXT (Step 1) or PAY (Step 2) button",
-        "flow": {
-          "step1": {
-            "buttonText": "NEXT",
-            "nextEvents": ["TOUCH_PAY_BUTTON", "TOUCH_BACK"]
-          },
-          "step2": {
-            "buttonText": "PAY",
-            "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BACK"]
-          }
-        }
+      "PAY_BUTTON_1": {
+        "description": "Step 1: NEXT button - moves to Step 2",
+        "nextEvents": ["PAY_AMOUNT", "PAY_BUTTON_2", "TOUCH_PAY_BACK"]
       },
-      "TOUCH_BACK": {
+      "PAY_BUTTON_2": {
+        "description": "Step 2: PAY button - completes transaction",
+        "nextEvents": ["PAGE_ENTER_HOME", "PAGE_ENTER_MORE", "TOUCH_PAY_BACK"]
+      },
+      "TOUCH_PAY_BACK": {
         "description": "Back from pay screen",
-        "nextEvents": ["SCROLL_DASHBOARD", "SCROLL_MORE_TAB"]
+        "nextEvents": ["PAGE_ENTER_HOME", "PAGE_ENTER_MORE"]
       }
     },
 
     "PIN_CHANGE_FLOW": {
-      "KEYSTROKE_TYPE_PIN_STEP_*": {
-        "description": "Typing PIN digits in each step",
-        "pattern": "KEYSTROKE_TYPE_PIN_STEP_{1|2|3}",
-        "items": {
-          "1": "Typing old PIN",
-          "2": "Typing new PIN",
-          "3": "Typing confirm PIN"
-        },
-        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_VERIFY_OLD_PIN", "TOUCH_SET_NEW_PIN", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_BACK_PIN_CHANGE"]
+      "TYPE_PIN_STEP_1": {
+        "description": "Step 1: Typing old PIN",
+        "nextEvents": ["TYPE_PIN_STEP_1", "TOUCH_VERIFY_OLD_PIN", "TOUCH_PIN_STEP_1_NEXT", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TYPE_PIN_STEP_2": {
+        "description": "Step 2: Typing new PIN",
+        "nextEvents": ["TYPE_PIN_STEP_2", "TOUCH_SET_NEW_PIN", "TOUCH_PIN_STEP_2_NEXT", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TYPE_PIN_STEP_3": {
+        "description": "Step 3: Typing confirm PIN",
+        "nextEvents": ["TYPE_PIN_STEP_3", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_PIN_STEP_3_NEXT", "TOUCH_BACK_PIN_CHANGE"]
       },
       "TOUCH_VERIFY_OLD_PIN": {
-        "description": "Step 1 Next: Verify old PIN - moves to step 2",
-        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_SET_NEW_PIN", "TOUCH_BACK_PIN_CHANGE"]
+        "description": "Step 1 NEXT (validation): Verify old PIN - moves to step 2",
+        "nextEvents": ["TYPE_PIN_STEP_2", "TOUCH_SET_NEW_PIN", "TOUCH_PIN_STEP_2_NEXT", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TOUCH_PIN_STEP_1_NEXT": {
+        "description": "Step 1 NEXT button (with touch tracking)",
+        "nextEvents": ["TYPE_PIN_STEP_2", "TOUCH_SET_NEW_PIN", "TOUCH_PIN_STEP_2_NEXT", "TOUCH_BACK_PIN_CHANGE"]
       },
       "TOUCH_SET_NEW_PIN": {
-        "description": "Step 2 Next: Set new PIN - moves to step 3",
-        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_BACK_PIN_CHANGE"]
+        "description": "Step 2 NEXT (validation): Set new PIN - moves to step 3",
+        "nextEvents": ["TYPE_PIN_STEP_3", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_PIN_STEP_3_NEXT", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TOUCH_PIN_STEP_2_NEXT": {
+        "description": "Step 2 NEXT button (with touch tracking)",
+        "nextEvents": ["TYPE_PIN_STEP_3", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_PIN_STEP_3_NEXT", "TOUCH_BACK_PIN_CHANGE"]
       },
       "TOUCH_CONFIRM_PIN_CHANGE": {
-        "description": "Step 3 Next: Confirm PIN - completes flow, returns to previous",
-        "nextEvents": ["SCROLL_PROFILE", "SCROLL_DASHBOARD"]
+        "description": "Step 3 NEXT (validation): Confirm PIN - completes flow",
+        "nextEvents": ["PAGE_ENTER_ACCOUNT", "PAGE_ENTER_PROFILE"]
+      },
+      "TOUCH_PIN_STEP_3_NEXT": {
+        "description": "Step 3 NEXT button (with touch tracking)",
+        "nextEvents": ["PAGE_ENTER_ACCOUNT", "PAGE_ENTER_PROFILE"]
       },
       "TOUCH_BACK_PIN_CHANGE": {
         "description": "Back button - goes to previous step or returns to previous screen",
-        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "SCROLL_PROFILE", "SCROLL_DASHBOARD"]
+        "nextEvents": ["TYPE_PIN_STEP_1", "TYPE_PIN_STEP_2", "TYPE_PIN_STEP_3", "PAGE_ENTER_ACCOUNT", "PAGE_ENTER_CARDS", "PAGE_ENTER_PROFILE"]
       }
     }
   },
 
   "navigationPatterns": {
     "bottomTabs": ["home", "cards", "more", "pay", "profile"],
-    "screensWithBackButton": ["account", "pin-change"],
-    "screensWithHeader": ["dashboard", "cards", "more"]
+    "pageEnterEvents": 7,
+    "pageTransitions": {
+      "from_home": ["cards", "more", "pay", "profile", "account", "pin-change"],
+      "from_cards": ["home", "more", "pay", "profile", "pin-change"],
+      "from_more": ["home", "cards", "pay", "profile", "account"],
+      "from_pay": ["home", "more", "account"],
+      "from_profile": ["home", "cards", "more", "pay", "pin-change"],
+      "from_account": ["home", "cards", "more", "pay", "profile", "pin-change"],
+      "from_pin_change": ["home", "cards", "account", "profile"]
+    },
+    "screensWithBackButton": ["account", "pin-change", "pay"]
   },
 
   "eventCounts": {
-    "header": 2,
-    "dashboard": 29,
-    "cards": 15,
+    "pageNavigation": 7,
+    "header": 4,
+    "dashboard": 75,
+    "cards": 16,
     "more": 36,
-    "account": 14,
+    "account": 15,
     "profileTab": 2,
-    "pay": 5,
-    "pinChange": 5,
-    "total": 108
+    "pay": 6,
+    "pinChange": 8,
+    "totalExplicit": 169
   }
 }
