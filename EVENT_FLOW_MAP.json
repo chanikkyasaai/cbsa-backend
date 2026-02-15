@@ -1,0 +1,347 @@
+{
+  "eventFlowMap": {
+    "HEADER_EVENTS": {
+      "TOUCH_SEARCH": {
+        "description": "Header search icon - stays on same screen",
+        "nextEvents": []
+      },
+      "TOUCH_PROFILE": {
+        "description": "Header profile icon - navigates to account screen",
+        "navigatesTo": "account",
+        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+      }
+    },
+
+    "DASHBOARD_SCREEN": {
+      "TOUCH_TAB_*": {
+        "description": "Horizontal tabs: ACCOUNTS, SAVE, INVEST, BORROW, SHOP & PAY",
+        "pattern": "TOUCH_TAB_{ACCOUNTS|SAVE|INVEST|BORROW|SHOP & PAY}",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_*"]
+      },
+      "SCROLL_DASHBOARD": {
+        "description": "Scrolling on dashboard",
+        "nextEvents": ["TOUCH_BALANCE_CARD", "TOUCH_BALANCE_TOGGLE", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY", "TOUCH_TRENDING_TOGGLE", "TOUCH_SERVICE_*"]
+      },
+      "TOUCH_BALANCE_CARD": {
+        "description": "Balance card - navigates to account screen",
+        "navigatesTo": "account",
+        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+      },
+      "TOUCH_BALANCE_TOGGLE": {
+        "description": "Show/hide balance - stays on dashboard",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BALANCE_CARD", "TOUCH_VIEW_ACCOUNTS", "TOUCH_TRANSACTION_HISTORY"]
+      },
+      "TOUCH_VIEW_ACCOUNTS": {
+        "description": "View accounts link - navigates to account screen",
+        "navigatesTo": "account",
+        "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+      },
+      "TOUCH_TRANSACTION_HISTORY": {
+        "description": "Transaction history - navigates to explore/more screen",
+        "navigatesTo": "explore",
+        "nextEvents": ["SCROLL_MORE_TAB", "TOUCH_QUICK_*", "TOUCH_EXPLORE_*", "TOUCH_APPLY_*"]
+      },
+      "TOUCH_TRENDING_TOGGLE": {
+        "description": "Expand/collapse trending section",
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_*"]
+      },
+      "TOUCH_SERVICE_*": {
+        "description": "Service icons (1-16) - no modal, just icon tap",
+        "pattern": "TOUCH_SERVICE_{1-16}",
+        "items": {
+          "1": "Fund transfer",
+          "2": "Fixed/Systematic Deposit Plan",
+          "3": "Periodic updation of KYC(Re-KYC)",
+          "4": "Forex (NEW)",
+          "5": "Apply IPO",
+          "6": "Digital loan",
+          "7": "Mutual funds",
+          "8": "Brands2You",
+          "9": "Healthcare Services",
+          "10": "Xplore the Globe",
+          "11": "Credit score (Free)",
+          "12": "Mobile recharge",
+          "13": "Flight booking",
+          "14": "Bus booking",
+          "15": "Train booking",
+          "16": "Send money abroad"
+        },
+        "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_SERVICE_*"]
+      }
+    },
+
+    "CARDS_SCREEN": {
+      "TOUCH_CARD_TAB_*": {
+        "description": "Card type tabs",
+        "pattern": "TOUCH_CARD_TAB_{DEBIT CARDS|CREDIT CARD|WEARABLE}",
+        "nextEvents": ["SCROLL_CARDS", "TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_*", "TOUCH_APPLY_DEBIT_CARD"]
+      },
+      "SCROLL_CARDS": {
+        "description": "Scrolling on cards screen",
+        "nextEvents": ["TOUCH_ACTIVE_CHANNELS", "TOUCH_NCMC_BALANCE", "TOUCH_LOCK_CARD", "TOUCH_BLOCK_CARD", "TOUCH_CARD_ACTION_*", "TOUCH_APPLY_DEBIT_CARD"]
+      },
+      "TOUCH_ACTIVE_CHANNELS": {
+        "description": "Expand active channels section",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_NCMC_BALANCE": {
+        "description": "Expand NCMC balance section",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_LOCK_CARD": {
+        "description": "Lock card button",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_BLOCK_CARD": {
+        "description": "Block card button",
+        "nextEvents": ["SCROLL_CARDS"]
+      },
+      "TOUCH_CARD_ACTION_*": {
+        "description": "Card action items (1-6)",
+        "pattern": "TOUCH_CARD_ACTION_{1-6}",
+        "items": {
+          "1": "Manage",
+          "2": "Set PIN",
+          "3": "Link card for QR payments",
+          "4": "Manage tokens",
+          "5": "View wallet balance",
+          "6": "Load money"
+        },
+        "nextEvents": ["SCROLL_CARDS"],
+        "specialCase": {
+          "TOUCH_CARD_ACTION_2": {
+            "description": "Set PIN - navigates to PIN change flow",
+            "navigatesTo": "pin-change",
+            "nextEvents": ["TOUCH_VERIFY_OLD_PIN", "TOUCH_BACK_PIN_CHANGE"]
+          }
+        }
+      },
+      "TOUCH_APPLY_DEBIT_CARD": {
+        "description": "Apply for card button",
+        "nextEvents": ["SCROLL_CARDS"]
+      }
+    },
+
+    "MORE_SCREEN": {
+      "SCROLL_MORE_TAB": {
+        "description": "Scrolling on More tab",
+        "nextEvents": ["TOUCH_QUICK_*", "TOUCH_EXPLORE_*", "TOUCH_APPLY_*"]
+      },
+      "TOUCH_QUICK_*": {
+        "description": "Quick actions section (1-4)",
+        "pattern": "TOUCH_QUICK_{1-4}",
+        "items": {
+          "1": "Debit card block",
+          "2": "Stop cheque",
+          "3": "Transaction history",
+          "4": "Generate MMID"
+        },
+        "nextEvents": ["SCROLL_MORE_TAB"],
+        "specialCase": {
+          "TOUCH_QUICK_3": {
+            "description": "Transaction history - navigates to transaction screen",
+            "navigatesTo": "transaction",
+            "nextEvents": ["TOUCH_BACK"]
+          }
+        }
+      },
+      "TOUCH_EXPLORE_*": {
+        "description": "Explore section (1-14)",
+        "pattern": "TOUCH_EXPLORE_{1-14}",
+        "items": {
+          "1": "My account",
+          "2": "My favorites",
+          "3": "Passbook",
+          "4": "Request services",
+          "5": "Fund transfer",
+          "6": "Recharge & bill Pay",
+          "7": "Cash on mobile",
+          "8": "Baroda FASTag",
+          "9": "Fixed/Systematic Deposit Plan",
+          "10": "Investment",
+          "11": "Digital loan",
+          "12": "Shop",
+          "13": "Invite & earn",
+          "14": "Currency converter"
+        },
+        "nextEvents": ["SCROLL_MORE_TAB"],
+        "specialCase": {
+          "TOUCH_EXPLORE_1": {
+            "description": "My account - navigates to account screen",
+            "navigatesTo": "account",
+            "nextEvents": ["SCROLL_PROFILE", "TOUCH_BACK", "TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+          }
+        }
+      },
+      "TOUCH_APPLY_*": {
+        "description": "Apply for section (1-16)",
+        "pattern": "TOUCH_APPLY_{1-16}",
+        "items": {
+          "1": "Mudra loan",
+          "2": "MSME loan",
+          "3": "Home loan",
+          "4": "Car loan",
+          "5": "Digital BKCC loan",
+          "6": "Locker",
+          "7": "Life insurance",
+          "8": "Motor insurance",
+          "9": "Health insurance",
+          "10": "Travel insurance",
+          "11": "Property insurance",
+          "12": "bob credit card",
+          "13": "Agriculture loan",
+          "14": "KVP account",
+          "15": "SCSS account",
+          "16": "TDS/TCS certificate"
+        },
+        "nextEvents": ["SCROLL_MORE_TAB"]
+      }
+    },
+
+    "ACCOUNT_SCREEN": {
+      "TOUCH_BACK": {
+        "description": "Back button - returns to previous screen",
+        "nextEvents": ["SCROLL_DASHBOARD", "SCROLL_CARDS", "SCROLL_MORE_TAB"]
+      },
+      "SCROLL_PROFILE": {
+        "description": "Scrolling on account screen",
+        "nextEvents": ["TOUCH_GET_CREDIT_SCORE", "TOUCH_MENU_*", "TOUCH_BOTTOM_*", "TOUCH_LOGOUT"]
+      },
+      "TOUCH_GET_CREDIT_SCORE": {
+        "description": "Get latest credit score button",
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_MENU_*": {
+        "description": "Menu items (1-7)",
+        "pattern": "TOUCH_MENU_{1-7}",
+        "items": {
+          "1": "KYC/CKYC Details",
+          "2": "Customer profile updation",
+          "3": "Contact details",
+          "4": "Change login PIN",
+          "5": "Change transaction PIN",
+          "6": "Switch to Classic",
+          "7": "Digital planner"
+        },
+        "nextEvents": ["SCROLL_PROFILE"],
+        "specialCase": {
+          "TOUCH_MENU_4": {
+            "description": "Change login PIN - navigates to PIN change",
+            "navigatesTo": "pin-change",
+            "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_BACK_PIN_CHANGE"]
+          },
+          "TOUCH_MENU_5": {
+            "description": "Change transaction PIN - navigates to PIN change",
+            "navigatesTo": "pin-change",
+            "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_BACK_PIN_CHANGE"]
+          }
+        }
+      },
+      "TOUCH_BOTTOM_*": {
+        "description": "Bottom action items (1-3)",
+        "pattern": "TOUCH_BOTTOM_{1-3}",
+        "items": {
+          "1": "Alerts & notifications",
+          "2": "App settings",
+          "3": "Need help"
+        },
+        "nextEvents": ["SCROLL_PROFILE"]
+      },
+      "TOUCH_LOGOUT": {
+        "description": "Logout - ends session",
+        "nextEvents": []
+      }
+    },
+
+    "PROFILE_TAB_SCREEN": {
+      "TOUCH_CHANGE_PIN": {
+        "description": "Change PIN button - navigates to PIN change",
+        "navigatesTo": "pin-change",
+        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TOUCH_LOGOUT": {
+        "description": "Logout button - ends session",
+        "nextEvents": []
+      }
+    },
+
+    "PAY_SCREEN": {
+      "SCROLL_PAY": {
+        "description": "Scrolling on pay screen",
+        "nextEvents": ["KEYSTROKE_PAY_RECIPIENT", "KEYSTROKE_PAY_AMOUNT", "TOUCH_PAY_BUTTON"]
+      },
+      "KEYSTROKE_PAY_RECIPIENT": {
+        "description": "Typing in recipient field (Step 1)",
+        "nextEvents": ["KEYSTROKE_PAY_RECIPIENT", "KEYSTROKE_PAY_AMOUNT", "TOUCH_PAY_BUTTON"]
+      },
+      "KEYSTROKE_PAY_AMOUNT": {
+        "description": "Typing in amount field (Step 1)",
+        "nextEvents": ["KEYSTROKE_PAY_RECIPIENT", "KEYSTROKE_PAY_AMOUNT", "TOUCH_PAY_BUTTON"]
+      },
+      "TOUCH_PAY_BUTTON": {
+        "description": "NEXT (Step 1) or PAY (Step 2) button",
+        "flow": {
+          "step1": {
+            "buttonText": "NEXT",
+            "nextEvents": ["TOUCH_PAY_BUTTON", "TOUCH_BACK"]
+          },
+          "step2": {
+            "buttonText": "PAY",
+            "nextEvents": ["SCROLL_DASHBOARD", "TOUCH_BACK"]
+          }
+        }
+      },
+      "TOUCH_BACK": {
+        "description": "Back from pay screen",
+        "nextEvents": ["SCROLL_DASHBOARD", "SCROLL_MORE_TAB"]
+      }
+    },
+
+    "PIN_CHANGE_FLOW": {
+      "KEYSTROKE_TYPE_PIN_STEP_*": {
+        "description": "Typing PIN digits in each step",
+        "pattern": "KEYSTROKE_TYPE_PIN_STEP_{1|2|3}",
+        "items": {
+          "1": "Typing old PIN",
+          "2": "Typing new PIN",
+          "3": "Typing confirm PIN"
+        },
+        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_VERIFY_OLD_PIN", "TOUCH_SET_NEW_PIN", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TOUCH_VERIFY_OLD_PIN": {
+        "description": "Step 1 Next: Verify old PIN - moves to step 2",
+        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_SET_NEW_PIN", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TOUCH_SET_NEW_PIN": {
+        "description": "Step 2 Next: Set new PIN - moves to step 3",
+        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "TOUCH_CONFIRM_PIN_CHANGE", "TOUCH_BACK_PIN_CHANGE"]
+      },
+      "TOUCH_CONFIRM_PIN_CHANGE": {
+        "description": "Step 3 Next: Confirm PIN - completes flow, returns to previous",
+        "nextEvents": ["SCROLL_PROFILE", "SCROLL_DASHBOARD"]
+      },
+      "TOUCH_BACK_PIN_CHANGE": {
+        "description": "Back button - goes to previous step or returns to previous screen",
+        "nextEvents": ["KEYSTROKE_TYPE_PIN_STEP_*", "SCROLL_PROFILE", "SCROLL_DASHBOARD"]
+      }
+    }
+  },
+
+  "navigationPatterns": {
+    "bottomTabs": ["home", "cards", "more", "pay", "profile"],
+    "screensWithBackButton": ["account", "pin-change"],
+    "screensWithHeader": ["dashboard", "cards", "more"]
+  },
+
+  "eventCounts": {
+    "header": 2,
+    "dashboard": 29,
+    "cards": 15,
+    "more": 36,
+    "account": 14,
+    "profileTab": 2,
+    "pay": 5,
+    "pinChange": 5,
+    "total": 108
+  }
+}

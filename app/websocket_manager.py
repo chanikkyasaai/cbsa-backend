@@ -23,8 +23,15 @@ class ConnectionManager:
         await websocket.send_json(message)
 
     async def broadcast(self, message: dict):
+        disconnected = []
         for connection in self.active_connections:
-            await connection.send_json(message)
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.append(connection)
+
+        for connection in disconnected:
+            self.disconnect(connection)
 
     def get_connection_count(self) -> int:
         return len(self.active_connections)

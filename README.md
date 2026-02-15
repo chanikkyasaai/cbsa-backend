@@ -8,6 +8,7 @@ A lightweight, production-ready FastAPI backend for real-time behavioral data st
 - **WebSocket-based streaming**: Real-time continuous data ingestion
 - **Multi-client support**: Handle multiple simultaneous connections
 - **Flexible data ingestion**: Accepts any JSON structure, no strict schema enforced
+- **Live monitoring UI**: Web page that visualizes event flow traversal
 - **Structured logging**: Comprehensive logging for monitoring
 - **Error handling**: Graceful handling of malformed data and disconnections
 - **Production-ready**: Clean, modular, and scalable architecture
@@ -75,30 +76,28 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 The server will start on `http://localhost:8000`
 
+Open `http://localhost:8000` to view the live event flow monitor.
+
 ## API Endpoints
 
 ### HTTP Endpoints
 
 #### `GET /`
-Health check endpoint that returns server status.
-
-**Response:**
-```json
-{
-  "message": "Backend running",
-  "app": "CBSA Backend",
-  "version": "1.0.0",
-  "active_connections": 0
-}
-```
+Serves the live event flow monitoring web page.
 
 #### `GET /health`
 Returns server health status and active connection count.
+
+#### `GET /event-flow-map`
+Serves the event flow map JSON used by the monitoring UI.
 
 ### WebSocket Endpoint
 
 #### `WS /ws/behaviour`
 WebSocket endpoint for continuous behavioral data streaming.
+
+#### `WS /ws/monitor`
+WebSocket endpoint used by the web UI to receive live events.
 
 
 ## Data Format

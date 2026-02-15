@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CBSA Event Flow Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="topbar">
+        <div>
+          <div class="title">CBSA Event Flow Monitor</div>
+          <div class="subtitle">Live traversal from mobile app events</div>
+        </div>
+        <div class="status" id="ws-status">Connecting...</div>
+      </header>
+
+      <main class="layout">
+        <section class="graph-panel">
+          <div class="graph-toolbar">
+            <div class="toolbar-left">
+              <button id="zoom-in" class="btn">+</button>
+              <button id="zoom-out" class="btn">-</button>
+              <button id="zoom-reset" class="btn">Reset</button>
+            </div>
+            <div class="toolbar-right">Graph is gray by default; green marks traversed path.</div>
+          </div>
+          <svg id="graph"></svg>
+          <div id="tooltip" class="tooltip" role="tooltip"></div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel-card device-card">
+            <h2>Device Info</h2>
+            <div id="device-info-content" class="device-info">
+              No device data yet.
+            </div>
+          </section>
+          <section class="panel-card events-card">
+            <h2>Incoming Events</h2>
+            <ul id="event-list" class="event-list"></ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
