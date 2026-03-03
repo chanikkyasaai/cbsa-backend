@@ -247,6 +247,102 @@ For production deployment, consider:
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
+## Deploying to Azure
+
+This repository includes a `Dockerfile` and a GitHub Actions workflow (`.github/workflows/azure-deploy.yml`) to deploy the backend to **Azure App Service for Containers**.
+
+### Prerequisites
+
+1. **Azure CLI** installed locally (`az` command).
+2. An **Azure subscription**.
+3. A **resource group**, **Azure Container Registry (ACR)**, and an **Azure App Service** (Linux, Docker container) created in your subscription.
+
+### One-time Azure Setup
+
+```bash
+# 1. Create a resource group
+az group create --name cbsa-rg --location eastus
+
+# 2. Create an Azure Container Registry
+az acr create --resource-group cbsa-rg --name <YOUR_ACR_NAME> --sku Basic --admin-enabled true
+
+# 3. Create an App Service plan (Linux)
+az appservice plan create --name cbsa-plan --resource-group cbsa-rg --is-linux --sku B1
+
+# 4. Create the Web App (Docker container)
+az webapp create \
+  --resource-group cbsa-rg \
+  --plan cbsa-plan \
+  --name <YOUR_WEBAPP_NAME> \
+  --deployment-container-image-name <YOUR_ACR_NAME>.azurecr.io/cbsa-backend:latest
+
+# 5. Configure the web app to pull from ACR
+az webapp config container set \
+  --name <YOUR_WEBAPP_NAME> \
+  --resource-group cbsa-rg \
+  --docker-custom-image-name <YOUR_ACR_NAME>.azurecr.io/cbsa-backend:latest \
+  --docker-registry-server-url https://<YOUR_ACR_NAME>.azurecr.io \
+  --docker-registry-server-user $(az acr credential show --name <YOUR_ACR_NAME> --query username -o tsv) \
+  --docker-registry-server-password $(az acr credential show --name <YOUR_ACR_NAME> --query passwords[0].value -o tsv)
+
+# 6. Create a service principal for GitHub Actions
+az ad sp create-for-rbac \
+  --name cbsa-github-actions \
+  --role contributor \
+  --scopes /subscriptions/<YOUR_SUBSCRIPTION_ID>/resourceGroups/cbsa-rg \
+  --sdk-auth
+```
+
+### GitHub Secrets
+
+Add the following secrets to your GitHub repository (**Settings → Secrets and variables → Actions**):
+
+| Secret | Value |
+|---|---|
+| `AZURE_CREDENTIALS` | Full JSON output from the `az ad sp create-for-rbac` command above |
+| `REGISTRY_LOGIN_SERVER` | `<YOUR_ACR_NAME>.azurecr.io` |
+| `REGISTRY_USERNAME` | ACR admin username (from `az acr credential show`) |
+| `REGISTRY_PASSWORD` | ACR admin password (from `az acr credential show`) |
+| `AZURE_WEBAPP_NAME` | The name you chose for the Web App |
+
+### CI/CD Pipeline
+
+Once the secrets are configured, every push to the `main` branch will automatically:
+
+1. Build a Docker image from the `Dockerfile`.
+2. Push the image to Azure Container Registry.
+3. Deploy the new image to Azure App Service.
+
+You can also trigger a deployment manually from **Actions → Build and Deploy to Azure App Service → Run workflow**.
+
+### Manual Deployment (without CI/CD)
+
+```bash
+# Build the image locally
+docker build -t <YOUR_ACR_NAME>.azurecr.io/cbsa-backend:latest .
+
+# Log in to ACR
+az acr login --name <YOUR_ACR_NAME>
+
+# Push the image
+docker push <YOUR_ACR_NAME>.azurecr.io/cbsa-backend:latest
+
+# Restart the web app to pull the latest image
+az webapp restart --name <YOUR_WEBAPP_NAME> --resource-group cbsa-rg
+```
+
+After deployment, the service is available at:
+
+```
+https://<YOUR_WEBAPP_NAME>.azurewebsites.net
+```
+
+WebSocket connections use `wss://` automatically via the Azure App Service TLS termination:
+
+```
+wss://<YOUR_WEBAPP_NAME>.azurewebsites.net/ws/behaviour
+```
+
 ## Architecture Notes
 
 This backend serves as the **real-time ingestion layer** for a multi-layer behavioral authentication system. It is designed to be:
