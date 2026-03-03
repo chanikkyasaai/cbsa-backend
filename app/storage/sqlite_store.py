@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ from app.models.prototype import Prototype
 from app.storage.memory_store import memory_store
 
 
-DB_PATH = Path(__file__).resolve().parents[2] / "cbsa.db"
+DB_PATH = Path(os.environ["DB_PATH"]) if os.environ.get("DB_PATH") else Path(__file__).resolve().parents[2] / "cbsa.db"
 WARMUP_WINDOW_COUNT = 20
 
 
