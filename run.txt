@@ -1,0 +1,38 @@
+== CBSA Backend - How to Run ==
+
+--- First-time setup (only once) ---
+cd cbsa-backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+--- Every time you open a new terminal ---
+cd cbsa-backend
+.\.venv\Scripts\Activate.ps1
+  (You should see (.venv) in your prompt)
+
+--- Start the main backend (port 8000) ---
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+--- (Optional) Start the GAT service (port 8001) ---
+  The main backend works fine without this. If gat-service is down,
+  Layer 3 returns similarity_score=0.0 as fallback.
+
+  First-time setup (heavy ~2GB download):
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    pip install torch_geometric
+
+  Then run (must cd into gat-service first!):
+    cd gat-service
+    uvicorn main:app --host 0.0.0.0 --port 8001
+
+--- Useful endpoints ---
+  REST API:       http://localhost:8000
+  Health check:   http://localhost:8000/health
+  Event monitor:  http://localhost:8000/static/index.html
+  WebSocket:      ws://localhost:8000/ws/behaviour
+  Monitor WS:     ws://localhost:8000/ws/monitor
+
+--- Mobile app config ---
+  In cbsa-app, set backend IP to your machine's local IP (e.g. 192.168.x.x)
+  on the login screen's config panel. Port: 8000
