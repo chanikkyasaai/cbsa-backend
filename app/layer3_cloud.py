@@ -1,76 +1,48 @@
 """
-Layer 3 GAT Cloud Interface
-Handles communication with the GAT processing service (gat-service)
+Layer 3 GAT Interface
+Previously made HTTP calls to the gat-service microservice; now calls the GAT
+engine in-process via app.gat_engine.InternalGATEngine.
 """
 import asyncio
-import aiohttp
 from typing import Dict, List, Optional
 from app.layer3_models import GATProcessingRequest, GATProcessingResponse, UserProfile
+from app.gat_engine import get_internal_engine
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class GATCloudInterface:
-    """Interface to cloud GAT processing service"""
-    
-    def __init__(self, cloud_endpoint: str = "https://behaviorbackend2.azurewebsites.net"):
-        self.cloud_endpoint = cloud_endpoint
-        self.session_timeout = 30.0  # 30 second timeout
-        self.retry_attempts = 3
-        
+    """
+    In-process interface to the GAT engine.
+
+    The public API is unchanged so all callers (Layer3GATManager etc.) work
+    without modification.  Internally, requests are now dispatched directly to
+    InternalGATEngine instead of an HTTP endpoint.
+    """
+
+    def __init__(self, cloud_endpoint: str = ""):
+        # cloud_endpoint kept for backwards-compat but is no longer used
+        self._engine = get_internal_engine()
+
     async def process_temporal_graph(self, request: GATProcessingRequest) -> GATProcessingResponse:
         """
-        Send temporal graph to GAT service for processing.
+        Process a temporal graph through the in-process GAT engine.
 
-        The gat-service (behaviorbackend2.azurewebsites.net) exposes
-        POST /process which runs the real SiameseGATNetwork / GATInferenceEngine.
+        Runs the (potentially blocking) inference in a thread-pool executor so
+        that the async event loop is never blocked.
         """
         try:
-            return await self._call_gat_service(request)
-        except Exception as e:
-            logger.error(f"GAT processing failed: {e}")
-            # Fallback — return zero similarity on failure
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self._engine.process_request, request
+            )
+        except Exception as exc:
+            logger.error("GAT processing failed: %s", exc)
             return GATProcessingResponse(
                 session_vector=[0.0] * 64,
                 similarity_score=0.0,
-                processing_time_ms=0.0
+                processing_time_ms=0.0,
             )
-
-    async def _call_gat_service(self, request: GATProcessingRequest) -> GATProcessingResponse:
-        """
-        HTTP call to the real GAT service endpoint (POST /process).
-        Retries with exponential back-off on timeout.
-        """
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.session_timeout)
-        ) as session:
-            payload = request.model_dump()
-
-            for attempt in range(self.retry_attempts):
-                try:
-                    async with session.post(
-                        f"{self.cloud_endpoint}/process",
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                    ) as response:
-                        if response.status == 200:
-                            result_data = await response.json()
-                            return GATProcessingResponse(**result_data)
-                        else:
-                            error_text = await response.text()
-                            logger.error(
-                                f"GAT service error {response.status}: {error_text}"
-                            )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        f"GAT service timeout, attempt {attempt + 1}/{self.retry_attempts}"
-                    )
-                    if attempt == self.retry_attempts - 1:
-                        raise
-                    await asyncio.sleep(1.0 * (attempt + 1))
-
-            raise Exception("GAT service unavailable after retries")
     
 class UserProfileManager:
     """Manages user behavioral profiles"""

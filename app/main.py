@@ -20,6 +20,7 @@ from app.layer3_manager import Layer3GATManager
 from app.enrollment_store import enrollment_store, ENROLLMENT_DURATION_SECONDS
 from app.behavioral_logger import behavioral_logger
 from app.triplet_trainer import triplet_trainer
+from app.cosmos_logger import cosmos_logger
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -311,6 +312,7 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                     should_escalate = await simulate_layer2_decision(session_id, behaviour_msg)
 
                     gat_similarity = None
+                    gat_result: Dict[str, Any] = {}
                     if should_escalate:
                         session_window = gat_manager.get_session_window(session_id)
                         if len(session_window) >= 5:
@@ -341,6 +343,7 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                         logger.error("Failed to broadcast to monitor clients: %s", e, exc_info=True)
 
                     # ---- Send response to client ----
+                    engine_metrics: Dict[str, Any] = {}
                     if warmup_state is not None and bool(warmup_state.get("warmup", False)):
                         response = {
                             "status": "WARMUP",
@@ -353,6 +356,13 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                             event.username,
                             preprocessed,
                         )
+                        engine_metrics = {
+                            "similarityScore": metrics.similarity_score,
+                            "shortDrift": metrics.short_drift,
+                            "longDrift": metrics.long_drift,
+                            "stabilityScore": metrics.stability_score,
+                            "matchedPrototypeId": metrics.matched_prototype_id,
+                        }
                         response = {
                             "similarity_score": metrics.similarity_score,
                             "short_drift": metrics.short_drift,
@@ -363,6 +373,28 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                     else:
                         # Engine failed — acknowledge receipt without metrics
                         response = {"status": "received"}
+
+                    # ---- Cosmos DB computation log ----
+                    cosmos_gat_record: Dict[str, Any] = {}
+                    if gat_result:
+                        cosmos_gat_record = {
+                            "similarityScore": gat_result.get("similarity_score"),
+                            "sessionVector": gat_result.get("session_vector"),
+                            "processingTimeMs": gat_result.get("processing_time_ms"),
+                            "graphEvents": gat_result.get("graph_events"),
+                            "graphDuration": gat_result.get("graph_duration"),
+                        }
+                    try:
+                        await asyncio.to_thread(
+                            cosmos_logger.log_computation,
+                            user_id,
+                            session_id,
+                            event_type_str,
+                            engine_metrics,
+                            cosmos_gat_record,
+                        )
+                    except Exception as cosmos_err:
+                        logger.error("Cosmos DB logging error: %s", cosmos_err)
 
                     await behaviour_manager.send_personal_message(response, websocket)
                 except ValueError as e:
