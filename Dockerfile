@@ -14,7 +14,7 @@ COPY . .
 # Azure App Service sets PORT env variable; default to 8000
 # WORKERS controls the number of uvicorn worker processes (default: 4)
 ENV PORT=8000
-ENV WORKERS=4
+ENV WORKERS=1
 
 EXPOSE 8000
 
