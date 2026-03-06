@@ -123,12 +123,12 @@ class CosmosComputationLogger:
             return
 
         now_utc = datetime.now(tz=timezone.utc)
-        human_timestamp = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-
         document: Dict[str, Any] = {
             "id": str(uuid.uuid4()),
             "userId": user_id,
-            "timestamp": human_timestamp,
+            # ISO 8601 (sortable/queryable) and a human-readable display string
+            "timestamp": now_utc.isoformat(),
+            "timestampDisplay": now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
             "sessionId": session_id,
             "eventType": event_type,
             "engineMetrics": engine_metrics or {},

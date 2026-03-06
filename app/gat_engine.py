@@ -1,36 +1,24 @@
 """
 Internal GAT Engine
-Provides in-process GAT processing, replacing the previous HTTP microservice approach.
-All GAT classes are instantiated directly; no network calls are made.
+Provides in-process GAT processing, replacing the previous HTTP microservice
+approach.  All GAT classes live in the app.gat package and are instantiated
+directly here; no network calls are made.
 """
 
 import logging
 import os
-import sys
 import time
 import random
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from app.layer3_models import GATProcessingRequest, GATProcessingResponse
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Path setup – make the gat-service directory importable
-# ---------------------------------------------------------------------------
-_GAT_SERVICE_DIR = os.path.join(
-    os.path.dirname(__file__),  # app/
-    "..",                        # repo root
-    "gat-service",
-)
-_GAT_SERVICE_DIR = os.path.normpath(_GAT_SERVICE_DIR)
-
-if _GAT_SERVICE_DIR not in sys.path:
-    sys.path.insert(0, _GAT_SERVICE_DIR)
-
-# ---------------------------------------------------------------------------
 # Try to import real GAT components; fall back to simulation if unavailable
+# (e.g. when torch / torch-geometric are not installed in the environment)
 # ---------------------------------------------------------------------------
 _GAT_AVAILABLE = False
 _SiameseGATNetwork = None
@@ -38,16 +26,16 @@ _GATInferenceEngine = None
 _PyTorchDataConverter = None
 
 try:
-    from gat_network import SiameseGATNetwork, GATInferenceEngine  # type: ignore[import]
-    from data_processor import PyTorchDataConverter  # type: ignore[import]
+    from app.gat.gat_network import SiameseGATNetwork, GATInferenceEngine  # type: ignore[import]
+    from app.gat.data_processor import PyTorchDataConverter
 
     _SiameseGATNetwork = SiameseGATNetwork
     _GATInferenceEngine = GATInferenceEngine
     _PyTorchDataConverter = PyTorchDataConverter
     _GAT_AVAILABLE = True
-    logger.info("GAT components imported successfully from gat-service")
+    logger.info("app.gat components imported successfully")
 except ImportError as exc:
-    logger.warning("GAT components not available (%s) – running in simulation mode", exc)
+    logger.warning("app.gat components not available (%s) – running in simulation mode", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -56,11 +44,11 @@ except ImportError as exc:
 
 class InternalGATEngine:
     """
-    In-process replacement for the remote GAT microservice.
+    In-process GAT engine.
 
-    On startup it tries to load the trained model from disk (same path as the
-    gat-service).  If PyTorch / torch-geometric are not installed it falls back
-    to a lightweight simulation that preserves the same response contract.
+    On first use it tries to load the trained model from the standard checkpoint
+    path.  If PyTorch / torch-geometric are not installed it falls back to a
+    lightweight simulation that preserves the same response contract.
     """
 
     def __init__(self):
@@ -85,7 +73,6 @@ class InternalGATEngine:
             return
 
         try:
-            # Mirror the config used by gat-service/config.py
             gat_config = {
                 "input_dim": 56,
                 "hidden_dim": 128,
@@ -99,16 +86,18 @@ class InternalGATEngine:
             self._inference_engine = _GATInferenceEngine(self._model, self._device)
             self._pytorch_converter = _PyTorchDataConverter()
 
-            # Try to load pre-trained weights
-            model_path = os.path.join(_GAT_SERVICE_DIR, "models", "gat_model.pth")
-            if not os.path.exists(model_path):
-                # Also check checkpoints directory at repo root
-                model_path = os.path.join(
-                    os.path.dirname(__file__), "..", "checkpoints", "gat_model.pth"
-                )
-                model_path = os.path.normpath(model_path)
+            # Look for pre-trained weights in the gat-service checkpoints or
+            # alongside the app.gat package itself.
+            _repo_root = os.path.normpath(
+                os.path.join(os.path.dirname(__file__), "..")
+            )
+            candidates = [
+                os.path.join(_repo_root, "gat-service", "models", "gat_model.pth"),
+                os.path.join(_repo_root, "checkpoints", "gat_model.pth"),
+            ]
+            model_path = next((p for p in candidates if os.path.exists(p)), None)
 
-            if os.path.exists(model_path):
+            if model_path:
                 import torch  # type: ignore[import]
 
                 state = torch.load(model_path, map_location=self._device)
@@ -118,7 +107,9 @@ class InternalGATEngine:
                 logger.info("No pre-trained GAT weights found – using random initialisation")
 
         except Exception as exc:
-            logger.error("Failed to initialise GAT model: %s – falling back to simulation", exc)
+            logger.error(
+                "Failed to initialise GAT model: %s – falling back to simulation", exc
+            )
             self._model = None
             self._inference_engine = None
             self._pytorch_converter = None
@@ -145,10 +136,7 @@ class InternalGATEngine:
 
     def _real_inference(self, request: GATProcessingRequest) -> GATProcessingResponse:
         try:
-            import torch  # type: ignore[import]
-
-            # Build a TemporalGraph-compatible object that PyTorchDataConverter accepts.
-            # We use a SimpleNamespace so we don't need to import gat-service models.
+            # Build a duck-typed graph object that PyTorchDataConverter accepts.
             graph = request.graph
             nodes_ns = [
                 SimpleNamespace(
@@ -185,11 +173,12 @@ class InternalGATEngine:
 
             graph_data_dict = self._pytorch_converter.convert_to_pytorch(graph_ns)
 
-            data = SimpleNamespace()
-            data.x = graph_data_dict["x"]
-            data.edge_index = graph_data_dict["edge_index"]
-            data.temporal_features = graph_data_dict["temporal_features"]
-            data.batch = graph_data_dict["batch"]
+            data = SimpleNamespace(
+                x=graph_data_dict["x"],
+                edge_index=graph_data_dict["edge_index"],
+                temporal_features=graph_data_dict["temporal_features"],
+                batch=graph_data_dict["batch"],
+            )
 
             profile_vector = request.user_profile_vector or [0.0] * self._output_dim
             result = self._inference_engine.authenticate(
@@ -214,7 +203,6 @@ class InternalGATEngine:
 
     def _simulate(self, request: GATProcessingRequest) -> GATProcessingResponse:
         start = time.time()
-        time.sleep(0.05)  # tiny delay to mimic processing
 
         session_vector = [random.uniform(-1.0, 1.0) for _ in range(self._output_dim)]
         similarity = (

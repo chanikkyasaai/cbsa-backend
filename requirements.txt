@@ -5,3 +5,5 @@ pydantic>=2.5.3
 numpy>=2.2.3
 aiohttp>=3.9.0
 azure-cosmos>=4.5.1
+torch>=2.0.0
+torch-geometric>=2.4.0
