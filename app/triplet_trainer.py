@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import hashlib
+import random
 
 from app.config import settings
 
@@ -97,13 +98,14 @@ def _window_to_matrix(window: List[dict]):
 
 class TripletTrainer:
     """
-    Trains a simple metric-learning model on user behavioral data.
-    Uses in-house user as anchor/positive and other users as negative.
-    Falls back to a numpy-based approach when PyTorch/PyG are unavailable,
-    producing a mean-vector profile instead.
+    Trains a shared GAT (Graph Attention Network) model on user behavioral data
+    using triplet loss with anchor-positive-negative triplets constructed from
+    all existing users.  Falls back to a numpy-based approach when PyTorch/PyG
+    are unavailable, producing a mean-vector profile instead.
     """
 
     def __init__(self):
+        self._model = None  # Shared trained GAT model (SiameseGATNetwork)
         if settings.DEBUG_MODE:
             PROFILES_DIR.mkdir(parents=True, exist_ok=True)
             CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +116,9 @@ class TripletTrainer:
 
     def train_user(self, user_id: str, force: bool = False) -> dict:
         """
-        Train a profile for a single user.
+        Generate a profile for a single user using the shared trained GAT model.
+        If no trained model exists, triggers train_all() first so the GAT is
+        trained on anchor-positive-negative triplets from *all* users.
         Returns a result dict with keys: user_id, status, message, profile_saved.
         """
         from app.cosmos_profile_store import cosmos_profile_store
@@ -145,27 +149,61 @@ class TripletTrainer:
                 "profile_saved": False,
             }
 
-        logger.info(f"Training profile for {user_id} with {len(windows)} session windows")
+        logger.info(f"Generating profile for {user_id} with {len(windows)} session windows")
 
         try:
-            import torch
-            result = self._train_pytorch(user_id, windows, force)
+            import torch  # noqa: F401
         except ImportError:
             logger.warning("PyTorch not available, using numpy fallback for profile creation")
-            result = self._train_numpy_fallback(user_id, windows)
+            return self._train_numpy_fallback(user_id, windows)
 
-        return result
+        # Try to load an existing trained GAT model
+        model = self._model or self._load_model()
+
+        if model is not None:
+            return self._generate_user_profile_from_model(user_id, windows, model)
+
+        # No trained model — train on all available users' data first
+        logger.info("No trained GAT model found. Training on all available users...")
+        results = self.train_all(force=True)
+
+        # Find this user's result in the training output
+        for r in results:
+            if r.get("user_id") == user_id:
+                return r
+
+        return {
+            "user_id": user_id,
+            "status": "error",
+            "message": "User data insufficient or training failed",
+            "profile_saved": False,
+        }
 
     def train_all(self, force: bool = False) -> List[dict]:
-        """Train profiles for every user who has behavioral data."""
+        """Train a shared GAT model on triplets from all users, then generate per-user profiles."""
         users = [p.stem for p in BEHAVIORAL_LOG_DIR.glob("*.jsonl")]
         if not users:
             return [{"status": "error", "message": "No behavioral data found for any user"}]
-        results = []
-        for uid in users:
-            logger.info(f"Training user: {uid}")
-            results.append(self.train_user(uid, force=force))
-        return results
+
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            logger.warning("PyTorch not available, using numpy fallback")
+            results: List[dict] = []
+            for uid in users:
+                events = _load_user_events(uid)
+                windows = _split_into_windows(events)
+                if len(windows) >= 2:
+                    results.append(self._train_numpy_fallback(uid, windows))
+                else:
+                    results.append({
+                        "user_id": uid, "status": "error",
+                        "message": f"Need at least 2 session windows, found {len(windows)}",
+                        "profile_saved": False,
+                    })
+            return results
+
+        return self._train_gat_all_users(users, force)
 
     # ------------------------------------------------------------------ #
     # Numpy fallback (mean-vector profile, no triplet loss)               #
@@ -190,98 +228,286 @@ class TripletTrainer:
         }
 
     # ------------------------------------------------------------------ #
-    # PyTorch triplet training                                             #
+    # GAT-based triplet training (all users)                               #
     # ------------------------------------------------------------------ #
 
-    def _train_pytorch(self, user_id: str, windows: List[List[dict]], force: bool) -> dict:
+    def _train_gat_all_users(self, users: List[str], force: bool) -> List[dict]:
+        """Train shared GAT model with triplets from all users, then generate profiles."""
         import torch
-        import torch.nn as nn
-        import numpy as np
+        from types import SimpleNamespace
+        from app.gat.gat_network import SiameseGATNetwork, GATTrainer
+        from app.gat.data_processor import BehavioralDataProcessor, PyTorchDataConverter
 
         device = torch.device("cpu")
 
-        # Build session embeddings for anchor user (mean-pool each window)
-        user_tensors = [
-            torch.FloatTensor(_window_to_matrix(w).mean(axis=0)).to(device)
-            for w in windows
-        ]
+        dp_config = {
+            'time_window_seconds': WINDOW_SECONDS,
+            'min_events_per_window': MIN_EVENTS_FOR_SESSION,
+            'max_events_per_window': 100,
+            'distinct_event_connections': 4,
+        }
+        processor = BehavioralDataProcessor(dp_config)
+        converter = PyTorchDataConverter()
 
-        # Gather negative samples from other users (if any)
-        all_users = [p.stem for p in BEHAVIORAL_LOG_DIR.glob("*.jsonl") if p.stem != user_id]
-        neg_tensors: List[torch.Tensor] = []
-        for other in all_users:
-            other_events = _load_user_events(other)
-            other_windows = _split_into_windows(other_events)
-            for w in other_windows:
-                mat = _window_to_matrix(w)
-                neg_tensors.append(torch.FloatTensor(mat.mean(axis=0)).to(device))
+        # ---- 1. Build per-user graph data --------------------------------
+        user_graphs: Dict[str, list] = {}
+        skipped: List[dict] = []
 
-        if not neg_tensors:
-            # No other users — synthetic negatives via additive Gaussian noise
-            logger.info(f"No other users found; generating synthetic negatives for {user_id}")
-            for t in user_tensors:
-                noise = torch.randn_like(t) * 0.5
-                neg_tensors.append((t + noise).clamp(0.0, 1.0))
+        for uid in users:
+            events = _load_user_events(uid)
+            windows = _split_into_windows(events)
+            if len(windows) < 2:
+                skipped.append({
+                    "user_id": uid, "status": "error",
+                    "message": f"Need at least 2 session windows, found {len(windows)}",
+                    "profile_saved": False,
+                })
+                continue
 
-        # Simple MLP encoder: 56-D → 64-D profile embedding
-        encoder = nn.Sequential(
-            nn.Linear(INPUT_DIM, HIDDEN_DIM),
-            nn.ReLU(),
-            nn.Dropout(DROPOUT),
-            nn.Linear(HIDDEN_DIM, OUTPUT_DIM),
-        ).to(device)
+            graphs = []
+            for i, w in enumerate(windows):
+                try:
+                    session_id = f"{uid}_session_{i}"
+                    tg = processor.process_behavioral_data(w, uid, session_id)
+                    gd_dict = converter.convert_to_pytorch(tg)
+                    gd = SimpleNamespace(
+                        x=gd_dict['x'],
+                        edge_index=gd_dict['edge_index'],
+                        temporal_features=gd_dict['temporal_features'],
+                        batch=gd_dict['batch'],
+                    )
+                    graphs.append(gd)
+                except Exception as e:
+                    logger.warning(f"Failed to convert window {i} for {uid}: {e}")
 
-        optimizer = torch.optim.Adam(encoder.parameters(), lr=LEARNING_RATE)
-        triplet_loss_fn = nn.TripletMarginLoss(margin=TRIPLET_MARGIN)
+            if len(graphs) >= 2:
+                user_graphs[uid] = graphs
+            else:
+                skipped.append({
+                    "user_id": uid, "status": "error",
+                    "message": "Not enough valid session graphs",
+                    "profile_saved": False,
+                })
 
+        if not user_graphs:
+            return skipped + [{"status": "error", "message": "No users with sufficient data for training"}]
+
+        # ---- 2. Create GAT model -----------------------------------------
+        gat_config = {
+            'input_dim': INPUT_DIM,
+            'hidden_dim': HIDDEN_DIM,
+            'output_dim': OUTPUT_DIM,
+            'num_heads': NUM_HEADS,
+            'dropout': DROPOUT,
+            'temporal_dim': TEMPORAL_DIM,
+        }
+        model = SiameseGATNetwork(gat_config)
+        trainer = GATTrainer(
+            model, learning_rate=LEARNING_RATE,
+            margin=TRIPLET_MARGIN, device=str(device),
+        )
+
+        # ---- 3. Train with triplets from all users -----------------------
+        all_user_ids = list(user_graphs.keys())
         n_epochs = 30
         t0 = time.time()
+
         for epoch in range(n_epochs):
             epoch_loss = 0.0
             count = 0
-            # Build triplets: every pair of anchor-positive windows with random negative
-            for i in range(len(user_tensors)):
-                for j in range(len(user_tensors)):
-                    if i == j:
-                        continue
-                    anchor = encoder(user_tensors[i].unsqueeze(0))
-                    positive = encoder(user_tensors[j].unsqueeze(0))
-                    neg_idx = int(torch.randint(0, len(neg_tensors), (1,)).item())
-                    negative = encoder(neg_tensors[neg_idx].unsqueeze(0))
-                    loss = triplet_loss_fn(anchor, positive, negative)
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    epoch_loss += loss.item()
-                    count += 1
-            if (epoch + 1) % 10 == 0:
-                logger.info(
-                    f"[{user_id}] Epoch {epoch+1}/{n_epochs}, "
-                    f"avg loss: {epoch_loss/max(count,1):.4f}"
-                )
 
-        # Create profile vector: mean of all encoded windows
-        encoder.eval()
-        with torch.no_grad():
-            encoded = [encoder(t.unsqueeze(0)).squeeze(0) for t in user_tensors]
-            profile_tensor = torch.stack(encoded).mean(dim=0)
-        profile_vector: List[float] = profile_tensor.cpu().numpy().tolist()  # type: ignore[assignment]
+            for uid in all_user_ids:
+                graphs = user_graphs[uid]
+                other_users = [u for u in all_user_ids if u != uid]
+
+                for i in range(len(graphs)):
+                    for j in range(len(graphs)):
+                        if i == j:
+                            continue
+
+                        anchor = graphs[i]
+                        positive = graphs[j]
+
+                        if other_users:
+                            neg_uid = random.choice(other_users)
+                            negative = random.choice(user_graphs[neg_uid])
+                        else:
+                            # Single user: synthetic negative via additive noise
+                            noisy_x = anchor.x + torch.randn_like(anchor.x) * 0.5
+                            negative = SimpleNamespace(
+                                x=noisy_x.clamp(0.0, 1.0),
+                                edge_index=anchor.edge_index,
+                                temporal_features=anchor.temporal_features,
+                                batch=anchor.batch,
+                            )
+
+                        loss = trainer.train_batch(anchor, positive, negative)
+                        epoch_loss += loss
+                        count += 1
+
+            if (epoch + 1) % 10 == 0:
+                avg_loss = epoch_loss / max(count, 1)
+                logger.info(f"Epoch {epoch+1}/{n_epochs}, avg triplet loss: {avg_loss:.4f}")
 
         elapsed = time.time() - t0
+        logger.info(f"GAT triplet training complete in {elapsed:.1f}s")
+
+        # ---- 4. Save model checkpoint ------------------------------------
+        self._save_checkpoint(model)
+        self._model = model
+
+        # ---- 5. Generate per-user profiles --------------------------------
+        results: List[dict] = list(skipped)
+        for uid, graphs in user_graphs.items():
+            profile_vector = self._generate_profile_vector(model, graphs)
+            self._save_profile(
+                uid, profile_vector,
+                method="gat_triplet", sessions=len(graphs), training_time=elapsed,
+            )
+            results.append({
+                "user_id": uid,
+                "status": "success",
+                "message": f"GAT triplet training complete in {elapsed:.1f}s",
+                "profile_saved": True,
+                "sessions_used": len(graphs),
+                "training_time_seconds": elapsed,
+            })
+
+        return results
+
+    # ------------------------------------------------------------------ #
+    # GAT model management                                                #
+    # ------------------------------------------------------------------ #
+
+    def _load_model(self):
+        """Load trained GAT model from checkpoint (blob storage or local disk)."""
+        try:
+            import torch
+            from app.gat.gat_network import SiameseGATNetwork
+        except ImportError:
+            return None
+
+        gat_config = {
+            'input_dim': INPUT_DIM,
+            'hidden_dim': HIDDEN_DIM,
+            'output_dim': OUTPUT_DIM,
+            'num_heads': NUM_HEADS,
+            'dropout': DROPOUT,
+            'temporal_dim': TEMPORAL_DIM,
+        }
+        model = SiameseGATNetwork(gat_config)
+
+        # Try blob storage first
+        model_path = None
+        try:
+            from app.blob_model_store import blob_model_store
+            if blob_model_store.enabled:
+                import tempfile
+                tmp_path = str(Path(tempfile.gettempdir()) / "gat_trainer_checkpoint.pt")
+                if blob_model_store.download_model(_CHECKPOINT_BLOB_NAME, tmp_path):
+                    model_path = tmp_path
+        except Exception:
+            pass
+
+        # Fall back to local checkpoint
+        if model_path is None and CHECKPOINT_PATH.exists():
+            model_path = str(CHECKPOINT_PATH)
+
+        if model_path is not None:
+            state = torch.load(model_path, map_location="cpu")
+            model.load_state_dict(state)
+            logger.info(f"Loaded GAT model from {model_path}")
+            self._model = model
+            return model
+
+        return None
+
+    def _save_checkpoint(self, model):
+        """Save GAT model checkpoint to disk and (optionally) blob storage."""
+        import torch
+
+        CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), str(CHECKPOINT_PATH))
+        logger.info(f"GAT model checkpoint saved to {CHECKPOINT_PATH}")
+
+        try:
+            from app.blob_model_store import blob_model_store
+            if blob_model_store.enabled:
+                blob_model_store.upload_model(str(CHECKPOINT_PATH), _CHECKPOINT_BLOB_NAME)
+        except Exception as e:
+            logger.debug(f"Blob checkpoint upload skipped: {e}")
+
+    def _generate_profile_vector(self, model, graphs) -> List[float]:
+        """Mean-pool GAT session embeddings into a 64-D profile vector."""
+        import torch
+
+        if not graphs:
+            return [0.0] * OUTPUT_DIM
+
+        model.eval()
+        embeddings = []
+        with torch.no_grad():
+            for gd in graphs:
+                emb = model.forward_once(
+                    gd.x, gd.edge_index, gd.temporal_features, gd.batch,
+                )
+                embeddings.append(emb)
+
+        profile = torch.stack(embeddings).mean(dim=0)
+        return profile.cpu().numpy().tolist()
+
+    def _generate_user_profile_from_model(
+        self, user_id: str, windows: List[List[dict]], model,
+    ) -> dict:
+        """Generate a profile for one user using an already-trained GAT model."""
+        from types import SimpleNamespace
+        from app.gat.data_processor import BehavioralDataProcessor, PyTorchDataConverter
+
+        dp_config = {
+            'time_window_seconds': WINDOW_SECONDS,
+            'min_events_per_window': MIN_EVENTS_FOR_SESSION,
+            'max_events_per_window': 100,
+            'distinct_event_connections': 4,
+        }
+        processor = BehavioralDataProcessor(dp_config)
+        converter = PyTorchDataConverter()
+
+        graphs = []
+        for i, w in enumerate(windows):
+            try:
+                session_id = f"{user_id}_session_{i}"
+                tg = processor.process_behavioral_data(w, user_id, session_id)
+                gd_dict = converter.convert_to_pytorch(tg)
+                gd = SimpleNamespace(
+                    x=gd_dict['x'],
+                    edge_index=gd_dict['edge_index'],
+                    temporal_features=gd_dict['temporal_features'],
+                    batch=gd_dict['batch'],
+                )
+                graphs.append(gd)
+            except Exception as e:
+                logger.warning(f"Failed to convert window {i} for {user_id}: {e}")
+
+        if len(graphs) < 2:
+            return {
+                "user_id": user_id,
+                "status": "error",
+                "message": "Not enough valid session graphs",
+                "profile_saved": False,
+            }
+
+        profile_vector = self._generate_profile_vector(model, graphs)
         self._save_profile(
             user_id, profile_vector,
-            method="triplet_mlp",
-            sessions=len(windows),
-            training_time=elapsed,
+            method="gat_triplet", sessions=len(graphs),
         )
 
         return {
             "user_id": user_id,
             "status": "success",
-            "message": f"Triplet training complete in {elapsed:.1f}s",
+            "message": "Profile generated using trained GAT model",
             "profile_saved": True,
-            "sessions_used": len(windows),
-            "training_time_seconds": elapsed,
+            "sessions_used": len(graphs),
         }
 
     # ------------------------------------------------------------------ #
