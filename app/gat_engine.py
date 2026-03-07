@@ -12,7 +12,6 @@ import random
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
-from app.config import settings
 from app.layer3_models import GATProcessingRequest, GATProcessingResponse
 
 logger = logging.getLogger(__name__)
@@ -87,42 +86,16 @@ class InternalGATEngine:
             self._inference_engine = _GATInferenceEngine(self._model, self._device)
             self._pytorch_converter = _PyTorchDataConverter()
 
-            # 1. Try downloading model from Azure Blob Storage
-            model_path = None
-            try:
-                from app.blob_model_store import blob_model_store
-
-                if blob_model_store.enabled:
-                    import tempfile
-
-                    tmp_path = os.path.join(
-                        tempfile.gettempdir(), "gat_model_from_blob.pth"
-                    )
-                    if blob_model_store.download_model(
-                        "gat_checkpoint.pt", tmp_path
-                    ):
-                        model_path = tmp_path
-                        logger.info(
-                            "Downloaded GAT model from Azure Blob Storage"
-                        )
-            except Exception as blob_exc:
-                logger.debug(
-                    "Blob model download skipped: %s", blob_exc
-                )
-
-            # 2. Fall back to local files on disk (dev / debug only)
-            if model_path is None and settings.DEBUG_MODE:
-                _repo_root = os.path.normpath(
-                    os.path.join(os.path.dirname(__file__), "..")
-                )
-                candidates = [
-                    os.path.join(_repo_root, "data", "checkpoints", "gat_checkpoint.pt"),
-                    os.path.join(_repo_root, "gat-service", "models", "gat_model.pth"),
-                    os.path.join(_repo_root, "checkpoints", "gat_model.pth"),
-                ]
-                model_path = next(
-                    (p for p in candidates if os.path.exists(p)), None
-                )
+            # Look for pre-trained weights in the gat-service checkpoints or
+            # alongside the app.gat package itself.
+            _repo_root = os.path.normpath(
+                os.path.join(os.path.dirname(__file__), "..")
+            )
+            candidates = [
+                os.path.join(_repo_root, "gat-service", "models", "gat_model.pth"),
+                os.path.join(_repo_root, "checkpoints", "gat_model.pth"),
+            ]
+            model_path = next((p for p in candidates if os.path.exists(p)), None)
 
             if model_path:
                 import torch  # type: ignore[import]
