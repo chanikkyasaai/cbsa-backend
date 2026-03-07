@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import hashlib
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -30,9 +28,6 @@ TRIPLET_MARGIN = 0.5
 LEARNING_RATE = 0.001
 MIN_EVENTS_FOR_SESSION = 5    # minimum events to form a session graph
 WINDOW_SECONDS = 30           # seconds per session window
-
-# Blob name for the shared GAT checkpoint
-_CHECKPOINT_BLOB_NAME = "gat_checkpoint.pt"
 
 
 def _event_type_embedding(event_type: str) -> List[float]:
@@ -104,9 +99,8 @@ class TripletTrainer:
     """
 
     def __init__(self):
-        if settings.DEBUG_MODE:
-            PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-            CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
@@ -117,9 +111,8 @@ class TripletTrainer:
         Train a profile for a single user.
         Returns a result dict with keys: user_id, status, message, profile_saved.
         """
-        from app.cosmos_profile_store import cosmos_profile_store
-
-        if cosmos_profile_store.has_profile(user_id) and not force:
+        profile_path = PROFILES_DIR / f"{user_id}_profile.json"
+        if profile_path.exists() and not force:
             return {
                 "user_id": user_id,
                 "status": "skipped",
@@ -296,21 +289,32 @@ class TripletTrainer:
         sessions: int = 0,
         training_time: float = 0.0,
     ):
-        from app.cosmos_profile_store import cosmos_profile_store
-
-        cosmos_profile_store.save_profile(
-            user_id=user_id,
-            vector=vector,
-            method=method,
-            sessions=sessions,
-            training_time=training_time,
-        )
-        logger.info(f"Profile saved for {user_id}")
+        PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        profile = {
+            "user_id": user_id,
+            "profile_vector": vector,
+            "vector_dim": len(vector),
+            "method": method,
+            "sessions_used": sessions,
+            "training_time_seconds": training_time,
+            "created_at": time.time(),
+        }
+        path = PROFILES_DIR / f"{user_id}_profile.json"
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(profile, f, indent=2)
+        logger.info(f"Profile saved for {user_id} → {path}")
 
     def load_profile(self, user_id: str) -> Optional[List[float]]:
-        from app.cosmos_profile_store import cosmos_profile_store
-
-        return cosmos_profile_store.load_profile(user_id)
+        path = PROFILES_DIR / f"{user_id}_profile.json"
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("profile_vector")
+        except Exception as e:
+            logger.error(f"Failed to load profile for {user_id}: {e}")
+            return None
 
 
 # Singleton
