@@ -21,7 +21,8 @@ class Settings:
     GAT_ESCALATION_THRESHOLD: float = 0.5  # Assume Layer 2 escalates at this threshold
     GAT_INFERENCE_INTERVAL_SECONDS: float = 5.0  # Interval between GAT inference calls
 
-    # Azure Cosmos DB – computation logging
+    # Azure Cosmos DB – shared connection settings for all containers.
+    # Used by: cosmos_logger (computation-logs), cosmos_profile_store (user-profiles).
     # Values are read from environment variables at runtime so secrets are
     # never hard-coded in source.
     COSMOS_ENDPOINT: str = os.environ.get("COSMOS_ENDPOINT", "")
@@ -30,7 +31,8 @@ class Settings:
     COSMOS_CONTAINER: str = os.environ.get("COSMOS_CONTAINER", "computation-logs")
     COSMOS_PROFILES_CONTAINER: str = os.environ.get("COSMOS_PROFILES_CONTAINER", "user-profiles")
 
-    # Azure Blob Storage – model checkpoint files (.pth)
+    # Azure Blob Storage – model checkpoint files (.pth).
+    # Used by: blob_model_store, gat_engine (download on startup).
     AZURE_STORAGE_CONNECTION_STRING: str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
     AZURE_STORAGE_CONTAINER: str = os.environ.get("AZURE_STORAGE_CONTAINER", "cbsa-models")
 

@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import hashlib
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -102,8 +104,9 @@ class TripletTrainer:
     """
 
     def __init__(self):
-        PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-        CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if settings.DEBUG_MODE:
+            PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+            CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
@@ -114,8 +117,9 @@ class TripletTrainer:
         Train a profile for a single user.
         Returns a result dict with keys: user_id, status, message, profile_saved.
         """
-        profile_path = PROFILES_DIR / f"{user_id}_profile.json"
-        if profile_path.exists() and not force:
+        from app.cosmos_profile_store import cosmos_profile_store
+
+        if cosmos_profile_store.has_profile(user_id) and not force:
             return {
                 "user_id": user_id,
                 "status": "skipped",

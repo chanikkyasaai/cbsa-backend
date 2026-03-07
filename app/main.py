@@ -728,15 +728,16 @@ async def truncate_all_data():
     # 7. Model checkpoints (Blob + local)
     try:
         blob_count = blob_model_store.delete_all_models()
-        local_ckpt_dir = Path(__file__).resolve().parent.parent / "data" / "checkpoints"
         local_count = 0
-        if local_ckpt_dir.exists():
-            for p in local_ckpt_dir.glob("*.pt"):
-                p.unlink(missing_ok=True)
-                local_count += 1
-            for p in local_ckpt_dir.glob("*.pth"):
-                p.unlink(missing_ok=True)
-                local_count += 1
+        if settings.DEBUG_MODE:
+            local_ckpt_dir = Path(__file__).resolve().parent.parent / "data" / "checkpoints"
+            if local_ckpt_dir.exists():
+                for p in local_ckpt_dir.glob("*.pt"):
+                    p.unlink(missing_ok=True)
+                    local_count += 1
+                for p in local_ckpt_dir.glob("*.pth"):
+                    p.unlink(missing_ok=True)
+                    local_count += 1
         results["model_checkpoints"] = f"deleted {blob_count} blobs + {local_count} local"
     except Exception as e:
         results["model_checkpoints"] = f"error: {e}"

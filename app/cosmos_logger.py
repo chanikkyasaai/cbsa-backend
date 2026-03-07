@@ -4,7 +4,8 @@ Cosmos DB Computation Logger
 Logs every processed event's computation results (engine metrics + GAT scores)
 as a JSON document in Azure Cosmos DB.
 
-Configuration is supplied via environment variables:
+Configuration is read from the centralised ``app.config.settings`` object
+which in turn reads from environment variables:
   COSMOS_ENDPOINT   – Cosmos DB account URI  (required to enable logging)
   COSMOS_KEY        – Cosmos DB primary/secondary key (required)
   COSMOS_DATABASE   – database name (default: "cbsa-logs")
@@ -15,10 +16,11 @@ If the environment variables are absent, logging is silently skipped.
 """
 
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +76,8 @@ class CosmosComputationLogger:
         if not _COSMOS_SDK_AVAILABLE:
             return
 
-        endpoint = os.environ.get("COSMOS_ENDPOINT", "").strip()
-        key = os.environ.get("COSMOS_KEY", "").strip()
+        endpoint = settings.COSMOS_ENDPOINT.strip()
+        key = settings.COSMOS_KEY.strip()
 
         if not endpoint or not key:
             logger.info(
@@ -83,8 +85,8 @@ class CosmosComputationLogger:
             )
             return
 
-        database_name = os.environ.get("COSMOS_DATABASE", "cbsa-logs")
-        container_name = os.environ.get("COSMOS_CONTAINER", "computation-logs")
+        database_name = settings.COSMOS_DATABASE
+        container_name = settings.COSMOS_CONTAINER
 
         try:
             client = CosmosClient(endpoint, credential=key)

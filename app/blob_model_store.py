@@ -1,7 +1,8 @@
 """
 Azure Blob Storage helper for model checkpoint files (.pth).
 
-Configuration is via environment variables:
+Configuration is read from the centralised ``app.config.settings`` object
+which in turn reads from environment variables:
   AZURE_STORAGE_CONNECTION_STRING  – full connection string (required)
   AZURE_STORAGE_CONTAINER          – blob container name (default: "cbsa-models")
 
@@ -9,12 +10,12 @@ If the connection string is absent, upload/download are silently skipped and
 the app falls back to local-disk model files.
 """
 
-import io
 import logging
 import os
-import tempfile
 from pathlib import Path
 from typing import Optional
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class BlobModelStore:
         if not _BLOB_SDK_AVAILABLE:
             return
 
-        conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "").strip()
+        conn_str = settings.AZURE_STORAGE_CONNECTION_STRING.strip()
         if not conn_str:
             logger.info(
                 "AZURE_STORAGE_CONNECTION_STRING not set – "
@@ -60,7 +61,7 @@ class BlobModelStore:
             )
             return
 
-        container_name = os.environ.get("AZURE_STORAGE_CONTAINER", "cbsa-models")
+        container_name = settings.AZURE_STORAGE_CONTAINER
 
         try:
             blob_service = BlobServiceClient.from_connection_string(conn_str)

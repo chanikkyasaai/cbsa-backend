@@ -12,6 +12,7 @@ import random
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
+from app.config import settings
 from app.layer3_models import GATProcessingRequest, GATProcessingResponse
 
 logger = logging.getLogger(__name__)
@@ -109,8 +110,8 @@ class InternalGATEngine:
                     "Blob model download skipped: %s", blob_exc
                 )
 
-            # 2. Fall back to local files on disk
-            if model_path is None:
+            # 2. Fall back to local files on disk (dev / debug only)
+            if model_path is None and settings.DEBUG_MODE:
                 _repo_root = os.path.normpath(
                     os.path.join(os.path.dirname(__file__), "..")
                 )

@@ -12,6 +12,9 @@ A lightweight, production-ready FastAPI backend for real-time behavioral data st
 - **Structured logging**: Comprehensive logging for monitoring
 - **Error handling**: Graceful handling of malformed data and disconnections
 - **Production-ready**: Clean, modular, and scalable architecture
+- **Azure Cosmos DB** – Computation logs + user profile storage (separate containers)
+- **Azure Blob Storage** – Model checkpoint (`.pth`) persistence
+- **Admin endpoints** – Per-user data wipe and full system truncate
 
 ## Requirements
 
@@ -25,12 +28,33 @@ backend/
 │
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                 # FastAPI application and WebSocket endpoint
-│   ├── websocket_manager.py    # Connection manager for multiple clients
-│   ├── models.py               # Pydantic models for data validation
-│   └── config.py               # Application configuration
+│   ├── main.py                  # FastAPI application, WebSocket + admin endpoints
+│   ├── config.py                # Application configuration & env vars
+│   ├── websocket_manager.py     # Connection manager for multiple clients
+│   ├── models/                  # Pydantic models for data validation
+│   ├── cosmos_logger.py         # Cosmos DB computation-log writer
+│   ├── cosmos_profile_store.py  # Cosmos DB user-profile store (64-D vectors)
+│   ├── blob_model_store.py      # Azure Blob Storage for .pth model files
+│   ├── triplet_trainer.py       # Triplet-loss training & profile creation
+│   ├── gat_engine.py            # In-process GAT inference engine
+│   ├── enrollment_store.py      # Enrollment state tracker
+│   ├── behavioral_logger.py     # Per-user JSONL event logger
+│   ├── layer3_manager.py        # GAT processing integration
+│   ├── layer3_cloud.py          # GAT cloud interface & profile manager
+│   ├── layer3_processor.py      # GAT data/result processors
+│   ├── layer3_models.py         # Layer 3 Pydantic models
+│   ├── engine/                  # Core engine (ingestion, preprocessing, similarity)
+│   ├── gat/                     # GAT neural network components
+│   └── storage/                 # SQLite store, memory store
+│
+├── data/
+│   ├── profiles/                # Local-disk user profiles (fallback)
+│   ├── behavioral_logs/         # Per-user JSONL behavioral logs
+│   └── checkpoints/             # Local-disk model checkpoints (fallback)
 │
 ├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
 └── README.md
 ```
 
@@ -222,6 +246,163 @@ Edit `app/config.py` to modify server settings:
 - `PORT`: Server port (default: 8000)
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `WEBSOCKET_ENDPOINT`: WebSocket route path
+- `DEBUG_MODE`: **`True`** (default) for development, **`False`** for production
+
+#### `DEBUG_MODE` behaviour
+
+| Area | `DEBUG_MODE = True` (dev) | `DEBUG_MODE = False` (prod) |
+|---|---|---|
+| User profiles (64-D) | Cosmos DB **+** local `data/profiles/` | **Cosmos DB only** – no local files |
+| Model checkpoints (`.pth`) | Blob Storage **+** local `data/checkpoints/` | **Blob Storage only** – local disk is not read or written |
+| GAT model loading | Blob → local fallback | **Blob only** |
+
+> **Important:** In production, set `DEBUG_MODE=False` and make sure
+> `COSMOS_ENDPOINT`/`COSMOS_KEY` and `AZURE_STORAGE_CONNECTION_STRING` are
+> configured. Without them the profile and model stores will be completely
+> disabled.
+
+### Environment Variables
+
+The following environment variables configure Azure integrations. All are
+**optional** – if absent, the corresponding feature is silently disabled.
+In development (`DEBUG_MODE=True`) the app falls back to local-disk storage;
+in production (`DEBUG_MODE=False`) **only** Azure stores are used.
+
+| Variable | Required for | Default | Description |
+|---|---|---|---|
+| `COSMOS_ENDPOINT` | Cosmos DB | *(empty – disabled)* | Azure Cosmos DB account URI |
+| `COSMOS_KEY` | Cosmos DB | *(empty – disabled)* | Cosmos DB primary or secondary key |
+| `COSMOS_DATABASE` | Cosmos DB | `cbsa-logs` | Database name (shared by all containers) |
+| `COSMOS_CONTAINER` | Computation logs | `computation-logs` | Container for per-event computation logs |
+| `COSMOS_PROFILES_CONTAINER` | User profiles | `user-profiles` | **Separate** container for 64-D user baseline profiles |
+| `AZURE_STORAGE_CONNECTION_STRING` | Blob Storage | *(empty – disabled)* | Full connection string for the Storage Account |
+| `AZURE_STORAGE_CONTAINER` | Blob Storage | `cbsa-models` | Blob container for `.pth` model checkpoints |
+
+> **Tip:** In Azure App Service, set these as *Application settings* so they're injected as environment variables at runtime.
+
+### Azure Setup Steps (you need to do this)
+
+#### 1. Create a Cosmos DB Account (if you don't have one)
+
+```bash
+# Create a Cosmos DB account (SQL / NoSQL API)
+az cosmosdb create \
+  --name <YOUR_COSMOSDB_ACCOUNT> \
+  --resource-group cbsa-rg \
+  --kind GlobalDocumentDB \
+  --default-consistency-level Session
+
+# Get the primary key
+az cosmosdb keys list \
+  --name <YOUR_COSMOSDB_ACCOUNT> \
+  --resource-group cbsa-rg \
+  --query primaryMasterKey -o tsv
+```
+
+The database and containers are auto-created on first run. Two containers will
+be created inside the same database (`cbsa-logs` by default):
+
+| Container | Partition Key | Purpose |
+|---|---|---|
+| `computation-logs` | `/userId` | Per-event engine metrics + GAT scores |
+| `user-profiles` | `/userId` | 64-D baseline profile vectors |
+
+#### 2. Create an Azure Storage Account + Blob Container
+
+```bash
+# Create a storage account
+az storage account create \
+  --name <YOUR_STORAGE_ACCOUNT> \
+  --resource-group cbsa-rg \
+  --location eastus \
+  --sku Standard_LRS
+
+# Get the connection string
+az storage account show-connection-string \
+  --name <YOUR_STORAGE_ACCOUNT> \
+  --resource-group cbsa-rg \
+  --query connectionString -o tsv
+```
+
+The blob container (`cbsa-models` by default) is auto-created on first run.
+It stores `.pth` model checkpoint files. On app startup, the GAT engine tries
+to download the latest checkpoint from Blob Storage; if unavailable it falls
+back to local files or random initialisation.
+
+#### 3. Set the Environment Variables
+
+For **local development**, create a `.env` file (already in `.gitignore`):
+
+```bash
+# .env
+COSMOS_ENDPOINT=https://<YOUR_COSMOSDB_ACCOUNT>.documents.azure.com:443/
+COSMOS_KEY=<YOUR_COSMOS_PRIMARY_KEY>
+COSMOS_DATABASE=cbsa-logs
+COSMOS_CONTAINER=computation-logs
+COSMOS_PROFILES_CONTAINER=user-profiles
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+AZURE_STORAGE_CONTAINER=cbsa-models
+```
+
+For **Azure App Service**, add the same values as Application settings:
+
+```bash
+az webapp config appsettings set \
+  --resource-group cbsa-rg \
+  --name <YOUR_WEBAPP_NAME> \
+  --settings \
+    COSMOS_ENDPOINT="https://<ACCOUNT>.documents.azure.com:443/" \
+    COSMOS_KEY="<KEY>" \
+    COSMOS_DATABASE="cbsa-logs" \
+    COSMOS_CONTAINER="computation-logs" \
+    COSMOS_PROFILES_CONTAINER="user-profiles" \
+    AZURE_STORAGE_CONNECTION_STRING="<CONN_STRING>" \
+    AZURE_STORAGE_CONTAINER="cbsa-models"
+```
+
+For **GitHub Actions**, add these as repository secrets and reference them in your workflow:
+
+| Secret | Value |
+|---|---|
+| `COSMOS_ENDPOINT` | Cosmos DB URI |
+| `COSMOS_KEY` | Cosmos DB key |
+| `AZURE_STORAGE_CONNECTION_STRING` | Storage Account connection string |
+
+## Admin Endpoints
+
+### `DELETE /admin/user/{user_id}`
+
+Deletes **all** data associated with a single user:
+
+- SQLite user row, prototypes, behaviour_logs
+- Behavioral log file (`.jsonl`)
+- User profile (Cosmos DB `user-profiles` container + local disk)
+- Enrollment state
+- In-memory GAT session windows
+- Cosmos DB computation logs for that user
+
+```bash
+curl -X DELETE http://localhost:8000/admin/user/alice
+```
+
+### `DELETE /admin/truncate`
+
+Deletes **all** data for every user across the entire system:
+
+- SQLite tables (users, prototypes, behaviour_logs)
+- All behavioral log files
+- All user profiles (Cosmos DB + local disk)
+- Enrollment store
+- All in-memory GAT session windows
+- All Cosmos DB computation logs
+- All model checkpoints (Blob Storage + local disk)
+
+```bash
+curl -X DELETE http://localhost:8000/admin/truncate
+```
+
+> ⚠️ **These endpoints are destructive.** In production, protect them with
+> authentication middleware or remove them entirely.
 
 ## Logging
 

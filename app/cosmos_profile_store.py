@@ -4,7 +4,8 @@ Cosmos DB User Profile Store
 Persists user baseline profiles (64-D vectors) in a dedicated Cosmos DB
 container, separate from the computation-log container.
 
-Configuration is supplied via environment variables:
+Configuration is read from the centralised ``app.config.settings`` object
+which in turn reads from environment variables:
   COSMOS_ENDPOINT            – Cosmos DB account URI  (required)
   COSMOS_KEY                 – Cosmos DB primary/secondary key (required)
   COSMOS_DATABASE            – database name   (default: "cbsa-logs")
@@ -17,10 +18,11 @@ falls back to local-disk JSON files so the app still works offline.
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +76,8 @@ class CosmosProfileStore:
         if not _COSMOS_SDK_AVAILABLE:
             return
 
-        endpoint = os.environ.get("COSMOS_ENDPOINT", "").strip()
-        key = os.environ.get("COSMOS_KEY", "").strip()
+        endpoint = settings.COSMOS_ENDPOINT.strip()
+        key = settings.COSMOS_KEY.strip()
         if not endpoint or not key:
             logger.info(
                 "COSMOS_ENDPOINT / COSMOS_KEY not set – "
@@ -83,10 +85,8 @@ class CosmosProfileStore:
             )
             return
 
-        database_name = os.environ.get("COSMOS_DATABASE", "cbsa-logs")
-        container_name = os.environ.get(
-            "COSMOS_PROFILES_CONTAINER", "user-profiles"
-        )
+        database_name = settings.COSMOS_DATABASE
+        container_name = settings.COSMOS_PROFILES_CONTAINER
 
         try:
             client = CosmosClient(endpoint, credential=key)
@@ -117,7 +117,12 @@ class CosmosProfileStore:
         sessions: int = 0,
         training_time: float = 0.0,
     ) -> None:
-        """Save or update a user profile.  Also writes to local disk."""
+        """Save or update a user profile.
+
+        In production (``DEBUG_MODE=False``) only Cosmos DB is written.
+        In development the profile is also persisted to local disk as a
+        fallback so the app works without Azure credentials.
+        """
         now = time.time()
         document: Dict[str, Any] = {
             "id": user_id,
@@ -143,11 +148,15 @@ class CosmosProfileStore:
                     exc,
                 )
 
-        # Also persist to local disk as fallback
-        self._save_local(user_id, vector, method, sessions, training_time, now)
+        # Local-disk fallback (dev / debug only)
+        if settings.DEBUG_MODE:
+            self._save_local(user_id, vector, method, sessions, training_time, now)
 
     def load_profile(self, user_id: str) -> Optional[List[float]]:
-        """Load a profile vector.  Tries Cosmos first, then local disk."""
+        """Load a profile vector.
+
+        Tries Cosmos first.  Falls back to local disk only in dev mode.
+        """
         if self._enabled and self._container is not None:
             try:
                 item = self._container.read_item(
@@ -157,12 +166,17 @@ class CosmosProfileStore:
                 if vec:
                     return vec
             except Exception:
-                pass  # fall through to local
+                pass  # fall through
 
-        return self._load_local(user_id)
+        if settings.DEBUG_MODE:
+            return self._load_local(user_id)
+        return None
 
     def has_profile(self, user_id: str) -> bool:
-        """Check whether a profile exists."""
+        """Check whether a profile exists.
+
+        In production only Cosmos is checked; in dev local disk is also checked.
+        """
         if self._enabled and self._container is not None:
             try:
                 self._container.read_item(
@@ -171,10 +185,12 @@ class CosmosProfileStore:
                 return True
             except Exception:
                 pass
-        return self._has_local(user_id)
+        if settings.DEBUG_MODE:
+            return self._has_local(user_id)
+        return False
 
     def delete_profile(self, user_id: str) -> bool:
-        """Delete a user profile from Cosmos and local disk."""
+        """Delete a user profile from Cosmos and (in dev mode) local disk."""
         deleted = False
         if self._enabled and self._container is not None:
             try:
@@ -185,14 +201,15 @@ class CosmosProfileStore:
             except Exception:
                 pass
 
-        local_path = PROFILES_DIR / f"{user_id}_profile.json"
-        if local_path.exists():
-            local_path.unlink()
-            deleted = True
+        if settings.DEBUG_MODE:
+            local_path = PROFILES_DIR / f"{user_id}_profile.json"
+            if local_path.exists():
+                local_path.unlink()
+                deleted = True
         return deleted
 
     def delete_all_profiles(self) -> int:
-        """Delete every profile in Cosmos and local disk.  Returns count."""
+        """Delete every profile in Cosmos and (in dev mode) local disk.  Returns count."""
         count = 0
 
         if self._enabled and self._container is not None:
@@ -215,8 +232,8 @@ class CosmosProfileStore:
             except Exception as exc:
                 logger.error("Failed to truncate Cosmos profiles: %s", exc)
 
-        # Local disk
-        if PROFILES_DIR.exists():
+        # Local disk (dev / debug only)
+        if settings.DEBUG_MODE and PROFILES_DIR.exists():
             for p in PROFILES_DIR.glob("*_profile.json"):
                 p.unlink(missing_ok=True)
                 count += 1
