@@ -200,10 +200,24 @@ class TripletTrainer:
         }
 
     def train_all(self, force: bool = False) -> List[dict]:
-        """Train a shared GAT model on triplets from all users, then generate per-user profiles."""
-        users = [p.stem for p in BEHAVIORAL_LOG_DIR.glob("*.jsonl")]
+        """Train a shared GAT model on triplets from all users, then generate per-user profiles.
+
+        User discovery order:
+          1. Cosmos DB via behavioral_logger.list_users() (queries behaviour-logs container)
+          2. Local JSONL files in data/behavioral_logs/ (fallback / debug)
+        The two sources are merged so users present in either place are included.
+        """
+        from app.behavioral_logger import behavioral_logger
+
+        cosmos_users = behavioral_logger.list_users()
+        local_users = [p.stem for p in BEHAVIORAL_LOG_DIR.glob("*.jsonl")]
+        # Merge, preserve order, deduplicate
+        users = list(dict.fromkeys(cosmos_users + local_users))
+
         if not users:
             return [{"status": "error", "message": "No behavioral data found for any user"}]
+
+        logger.info("train_all: discovered %d users (%d from Cosmos, %d local)", len(users), len(cosmos_users), len(local_users))
 
         try:
             import torch  # noqa: F401
