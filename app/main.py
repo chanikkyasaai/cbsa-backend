@@ -1,11 +1,13 @@
+import io
 import json
 import logging
 import time
 import asyncio
 import uuid
+import zipfile
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from typing import List, Dict, Any, Optional
@@ -1003,3 +1005,220 @@ async def upload_legacy_data(authorization: Optional[str] = Header(default=None)
         results["jsonl_migration"] = {"error": str(exc)}
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Cosmos DB snapshot helpers & endpoints
+# ---------------------------------------------------------------------------
+
+DUMP_ROOT = Path(__file__).resolve().parent.parent / "data" / "cosmos_dump"
+
+_COSMOS_CONTAINERS = [
+    # (settings-key-name-for-logging, partition_key_field, live_container_object_getter)
+    # Evaluated lazily inside helpers so late-binding works.
+]
+
+
+def _get_containers():
+    """Return list of (label, pk_field, container) tuples at call time."""
+    return [
+        (settings.COSMOS_CONTAINER,                "userId", cosmos_logger._container),
+        (settings.COSMOS_PROFILES_CONTAINER,       "userId", cosmos_profile_store._container),
+        (settings.COSMOS_ENROLLMENT_CONTAINER,     "userId", enrollment_store._container),
+        (settings.COSMOS_PROTOTYPE_CONTAINER,      "userId", cosmos_prototype_store._proto_container),
+        (settings.COSMOS_BEHAVIOUR_LOGS_CONTAINER, "userId", cosmos_prototype_store._logs_container),
+    ]
+
+
+def _query_all_containers() -> Dict[str, Any]:
+    """
+    Query every Cosmos container.
+    Returns a dict mapping container_name → list[dict] of all documents.
+    Nothing is written to disk here.
+    """
+    containers = _get_containers()
+    logger.info("cosmos_dump: starting query across %d containers", len(containers))
+    result: Dict[str, Any] = {}
+
+    for container_name, pk_field, container in containers:
+        if container is None:
+            logger.warning("cosmos_dump: container '%s' is not connected – skipping", container_name)
+            result[container_name] = None
+            continue
+
+        logger.info("cosmos_dump: querying container '%s' …", container_name)
+        try:
+            items = list(
+                container.query_items(
+                    query="SELECT * FROM c",
+                    enable_cross_partition_query=True,
+                )
+            )
+            logger.info(
+                "cosmos_dump: container '%s' returned %d document(s)", container_name, len(items)
+            )
+            result[container_name] = {"pk_field": pk_field, "items": items}
+        except Exception as exc:
+            logger.error(
+                "cosmos_dump: failed to query container '%s': %s", container_name, exc
+            )
+            result[container_name] = {"error": str(exc)}
+
+    logger.info("cosmos_dump: all containers queried")
+    return result
+
+
+def _write_dump_to_disk(query_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Write pre-fetched query results to DUMP_ROOT/<container>/<pk_value>.json.
+    Returns a per-container summary dict.
+    """
+    summary: Dict[str, Any] = {}
+    logger.info("cosmos_dump: writing files to %s", DUMP_ROOT)
+
+    for container_name, data in query_result.items():
+        if data is None:
+            summary[container_name] = {"skipped": "container not connected"}
+            continue
+        if "error" in data:
+            summary[container_name] = {"error": data["error"]}
+            continue
+
+        pk_field = data["pk_field"]
+        items = data["items"]
+        container_dir = DUMP_ROOT / container_name
+        container_dir.mkdir(parents=True, exist_ok=True)
+
+        # Group by partition key value
+        groups: Dict[str, list] = {}
+        for item in items:
+            pk_value = str(item.get(pk_field, "__unknown__"))
+            groups.setdefault(pk_value, []).append(item)
+
+        files_written = 0
+        for pk_value, docs in groups.items():
+            safe_name = "".join(
+                ch if ch.isalnum() or ch in "-_." else "_" for ch in pk_value
+            )
+            out_path = container_dir / f"{safe_name}.json"
+            out_path.write_text(json.dumps(docs, indent=2, default=str), encoding="utf-8")
+            files_written += 1
+            logger.debug(
+                "cosmos_dump: wrote %s (%d doc(s))", out_path.relative_to(DUMP_ROOT.parent), len(docs)
+            )
+
+        logger.info(
+            "cosmos_dump: container '%s' → %d partition file(s) written", container_name, files_written
+        )
+        summary[container_name] = {
+            "total_documents": len(items),
+            "partition_key_field": pk_field,
+            "files_written": files_written,
+            "output_dir": str(container_dir),
+        }
+
+    logger.info("cosmos_dump: local write complete")
+    return summary
+
+
+def _build_zip_from_query(query_result: Dict[str, Any]) -> bytes:
+    """
+    Build an in-memory zip from pre-fetched query results.
+    Structure: cosmos_dump/<container>/<pk_value>.json
+    Nothing is written to disk.
+    """
+    logger.info("cosmos_dump: building in-memory zip …")
+    buf = io.BytesIO()
+    total_files = 0
+
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for container_name, data in query_result.items():
+            if data is None or "error" in data:
+                logger.warning(
+                    "cosmos_dump: skipping container '%s' in zip (%s)",
+                    container_name,
+                    "not connected" if data is None else data.get("error"),
+                )
+                continue
+
+            pk_field = data["pk_field"]
+            items = data["items"]
+
+            groups: Dict[str, list] = {}
+            for item in items:
+                pk_value = str(item.get(pk_field, "__unknown__"))
+                groups.setdefault(pk_value, []).append(item)
+
+            for pk_value, docs in groups.items():
+                safe_name = "".join(
+                    ch if ch.isalnum() or ch in "-_." else "_" for ch in pk_value
+                )
+                arc_path = f"cosmos_dump/{container_name}/{safe_name}.json"
+                zf.writestr(arc_path, json.dumps(docs, indent=2, default=str))
+                total_files += 1
+                logger.debug("cosmos_dump: zipped %s (%d doc(s))", arc_path, len(docs))
+
+    zip_bytes = buf.getvalue()
+    logger.info(
+        "cosmos_dump: zip complete – %d file(s), %.1f KB", total_files, len(zip_bytes) / 1024
+    )
+    return zip_bytes
+
+
+@app.post("/admin/cosmos-dump/download")
+async def admin_cosmos_dump_download(authorization: Optional[str] = Header(default=None)):
+    """
+    **Production endpoint** – reads every document from every Cosmos DB
+    container, packages everything into an in-memory zip, and streams it as
+    ``cosmos_dump.zip`` directly to the caller's device.  Nothing is written
+    to the server's disk.
+
+    Zip structure::
+
+        cosmos_dump/
+          <container-name>/
+            <partition-key-value>.json
+
+    Requires ``Authorization: Bearer <ADMIN_TOKEN>`` header.
+    """
+    _verify_admin_token(authorization)
+    logger.info("cosmos_dump/download: request received")
+
+    query_result = await asyncio.to_thread(_query_all_containers)
+    zip_bytes = await asyncio.to_thread(_build_zip_from_query, query_result)
+
+    logger.info("cosmos_dump/download: streaming zip to client (%.1f KB)", len(zip_bytes) / 1024)
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=cosmos_dump.zip"},
+    )
+
+
+@app.post("/admin/cosmos-dump")
+async def admin_cosmos_dump(authorization: Optional[str] = Header(default=None)):
+    """
+    **Debug endpoint** – reads every document from every Cosmos DB container
+    and writes them to the server's local filesystem under::
+
+        data/cosmos_dump/<container-name>/<partition-key-value>.json
+
+    Each file is a JSON array of all documents sharing that partition-key
+    value.  Existing files are overwritten on each call.  Nothing is streamed
+    back to the caller beyond a JSON summary.
+
+    Only available when ``DEBUG_MODE=True`` in settings.
+    Requires ``Authorization: Bearer <ADMIN_TOKEN>`` header.
+    """
+    _verify_admin_token(authorization)
+    if not settings.DEBUG_MODE:
+        raise HTTPException(
+            status_code=403,
+            detail="Local-disk dump is only available in DEBUG_MODE. Use POST /admin/cosmos-dump/download instead.",
+        )
+
+    logger.info("cosmos_dump: local dump request received (DEBUG_MODE)")
+    query_result = await asyncio.to_thread(_query_all_containers)
+    summary = await asyncio.to_thread(_write_dump_to_disk, query_result)
+    logger.info("cosmos_dump: local dump finished – summary: %s", summary)
+    return {"dump_root": str(DUMP_ROOT), "containers": summary}

@@ -30,7 +30,8 @@ TEMPORAL_DIM = 16
 TRIPLET_MARGIN = 0.5
 LEARNING_RATE = 0.001
 MIN_EVENTS_FOR_SESSION = 5    # minimum events to form a session graph
-WINDOW_SECONDS = 30           # seconds per session window
+WINDOW_SECONDS = 20           # seconds per session window
+WINDOW_STRIDE_SECONDS = 2    # sliding-window stride (90% overlap)
 
 # Blob name for the shared GAT checkpoint
 _CHECKPOINT_BLOB_NAME = "gat_checkpoint.pt"
@@ -76,24 +77,35 @@ def _load_user_events(user_id: str) -> List[dict]:
     return sorted(file_events, key=lambda e: e.get("timestamp", 0))
 
 
-def _split_into_windows(events: List[dict], window_sec: float = WINDOW_SECONDS) -> List[List[dict]]:
-    """Split a sorted event list into non-overlapping time windows."""
+def _split_into_windows(
+    events: List[dict],
+    window_sec: float = WINDOW_SECONDS,
+    stride_sec: float = WINDOW_STRIDE_SECONDS,
+) -> List[List[dict]]:
+    """Split a sorted event list into sliding time windows.
+
+    Each window spans ``window_sec`` seconds.  The next window starts
+    ``stride_sec`` seconds after the previous one, producing a 50% overlap
+    when stride_sec == window_sec / 2.
+    """
     if not events:
         return []
+
+    first_ts = events[0].get("timestamp", 0) or 0.0
+    last_ts = events[-1].get("timestamp", 0) or 0.0
+
     windows = []
-    window: List[dict] = []
-    window_start = events[0].get("timestamp", 0) or 0.0
-    for ev in events:
-        ts = ev.get("timestamp", 0) or 0.0
-        if ts - window_start <= window_sec:
-            window.append(ev)
-        else:
-            if len(window) >= MIN_EVENTS_FOR_SESSION:
-                windows.append(window)
-            window = [ev]
-            window_start = ts
-    if len(window) >= MIN_EVENTS_FOR_SESSION:
-        windows.append(window)
+    win_start = first_ts
+    while win_start <= last_ts:
+        win_end = win_start + window_sec
+        window = [
+            ev for ev in events
+            if win_start <= (ev.get("timestamp", 0) or 0.0) < win_end
+        ]
+        if len(window) >= MIN_EVENTS_FOR_SESSION:
+            windows.append(window)
+        win_start += stride_sec
+
     return windows
 
 
