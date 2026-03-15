@@ -33,7 +33,7 @@ class GATSettings:
     min_events_per_window: int = 5
     max_events_per_window: int = 100
     distinct_event_connections: int = 4  # Connect across 4 distinct event types
-    device: str = "cpu"  # "cuda" if GPU available
+    device: str = "cpu"  # Inference uses CPU; only train_all uses CUDA
     
     # Model persistence
     model_save_path: str = "./models/gat_model.pth"

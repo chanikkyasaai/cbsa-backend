@@ -302,23 +302,12 @@ class TripletTrainer:
         try:
             import torch  # noqa: F401
         except ImportError:
-            logger.warning("[train_all] PyTorch not available, using numpy fallback")
-            results: List[dict] = []
-            for uid in users:
-                logger.info("[train_all] Processing user '%s' (numpy fallback) …", uid)
-                events = _load_user_events(uid)
-                windows = _split_into_windows(events)
-                if len(windows) >= 2:
-                    results.append(self._train_numpy_fallback(uid, windows))
-                else:
-                    logger.warning("[train_all] User '%s' skipped: %d windows (need >= 2)", uid, len(windows))
-                    results.append({
-                        "user_id": uid, "status": "error",
-                        "message": f"Need at least 2 session windows, found {len(windows)}",
-                        "profile_saved": False,
-                    })
-            logger.info("[train_all] === train_all complete (numpy fallback): %d results ===", len(results))
-            return results
+            logger.error("[train_all] PyTorch not available – cannot train")
+            return [{"status": "error", "message": "Server error: PyTorch is required for training"}]
+
+        if not torch.cuda.is_available():
+            logger.error("[train_all] CUDA is not available – cannot train")
+            return [{"status": "error", "message": "Server error: CUDA is not available for training"}]
 
         return self._train_gat_all_users(users, force)
 
@@ -357,7 +346,7 @@ class TripletTrainer:
         from app.gat.gat_network import SiameseGATNetwork, GATTrainer
         from app.gat.data_processor import BehavioralDataProcessor, PyTorchDataConverter
 
-        device = torch.device("cpu")
+        device = torch.device("cuda")
 
         dp_config = {
             'time_window_seconds': WINDOW_SECONDS,
