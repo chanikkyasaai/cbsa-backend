@@ -433,6 +433,7 @@ class TripletTrainer:
             count = 0
 
             for uid in all_user_ids:
+                logger.info("[gat_train] epoch %d of user %s", epoch, uid)
                 graphs = user_graphs[uid]
                 other_users = [u for u in all_user_ids if u != uid]
 
@@ -573,7 +574,8 @@ class TripletTrainer:
                 embeddings.append(emb)
 
         profile = torch.stack(embeddings).mean(dim=0)
-        return profile.cpu().numpy().tolist()
+        # Ensure we always return a JSON-serialisable list of floats
+        return list(profile.cpu().numpy().tolist())
 
     def _generate_user_profile_from_model(
         self, user_id: str, windows: List[List[dict]], model,

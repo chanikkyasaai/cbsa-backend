@@ -291,6 +291,12 @@ class SiameseGATNetwork(nn.Module):
             data2.temporal_features, data2.batch,
             return_attention=False
         )
+        # forward_once may return (embedding, attention) when return_attention=True;
+        # ensure we have only the tensor embedding here
+        if isinstance(emb1, tuple):
+            emb1 = emb1[0]
+        if isinstance(emb2, tuple):
+            emb2 = emb2[0]
         
         # Compute cosine similarity
         similarity = F.cosine_similarity(emb1, emb2, dim=-1)
@@ -344,19 +350,32 @@ class GATTrainer:
         """Train on single batch of triplets"""
         self.model.train()
         self.optimizer.zero_grad()
-        
+        # Move input tensors to the model/device to avoid CPU/CUDA mismatches
+        def _move_graph(g):
+            # Some graphs may have None for batch
+            return type(g)(**{
+                'x': g.x.to(self.device) if hasattr(g, 'x') and g.x is not None else None,
+                'edge_index': g.edge_index.to(self.device) if hasattr(g, 'edge_index') and g.edge_index is not None else None,
+                'temporal_features': g.temporal_features.to(self.device) if hasattr(g, 'temporal_features') and g.temporal_features is not None else None,
+                'batch': g.batch.to(self.device) if hasattr(g, 'batch') and g.batch is not None else None,
+            })
+
+        a = _move_graph(anchor_data)
+        p = _move_graph(positive_data)
+        n = _move_graph(negative_data)
+
         # Get embeddings
         anchor_emb = self.model.forward_once(
-            anchor_data.x, anchor_data.edge_index,
-            anchor_data.temporal_features, anchor_data.batch
+            a.x, a.edge_index,
+            a.temporal_features, a.batch
         )
         positive_emb = self.model.forward_once(
-            positive_data.x, positive_data.edge_index,
-            positive_data.temporal_features, positive_data.batch
+            p.x, p.edge_index,
+            p.temporal_features, p.batch
         )
         negative_emb = self.model.forward_once(
-            negative_data.x, negative_data.edge_index,
-            negative_data.temporal_features, negative_data.batch
+            n.x, n.edge_index,
+            n.temporal_features, n.batch
         )
         
         # Compute triplet loss
@@ -376,19 +395,32 @@ class GATTrainer:
         
         with torch.no_grad():
             for anchor, positive, negative in test_data:
+                # Move inputs to device
+                def _mv(g):
+                    return type(g)(**{
+                        'x': g.x.to(self.device) if hasattr(g, 'x') and g.x is not None else None,
+                        'edge_index': g.edge_index.to(self.device) if hasattr(g, 'edge_index') and g.edge_index is not None else None,
+                        'temporal_features': g.temporal_features.to(self.device) if hasattr(g, 'temporal_features') and g.temporal_features is not None else None,
+                        'batch': g.batch.to(self.device) if hasattr(g, 'batch') and g.batch is not None else None,
+                    })
+
+                a = _mv(anchor)
+                p = _mv(positive)
+                n = _mv(negative)
+
                 anchor_emb = self.model.forward_once(
-                    anchor.x, anchor.edge_index,
-                    anchor.temporal_features, anchor.batch
+                    a.x, a.edge_index,
+                    a.temporal_features, a.batch
                 )
                 positive_emb = self.model.forward_once(
-                    positive.x, positive.edge_index,
-                    positive.temporal_features, positive.batch
+                    p.x, p.edge_index,
+                    p.temporal_features, p.batch
                 )
                 negative_emb = self.model.forward_once(
-                    negative.x, negative.edge_index,
-                    negative.temporal_features, negative.batch
+                    n.x, n.edge_index,
+                    n.temporal_features, n.batch
                 )
-                
+
                 loss = self.triplet_loss_custom(anchor_emb, positive_emb, negative_emb)
                 total_loss += loss.item()
                 num_batches += 1
@@ -420,17 +452,37 @@ class GATInferenceEngine:
             attention_dict: (Optional) if return_attention=True
         """
         with torch.no_grad():
+            # Ensure input tensors are on the same device as the model
+            def _mv(g):
+                return type(g)(**{
+                    'x': g.x.to(self.device) if hasattr(g, 'x') and g.x is not None else None,
+                    'edge_index': g.edge_index.to(self.device) if hasattr(g, 'edge_index') and g.edge_index is not None else None,
+                    'temporal_features': g.temporal_features.to(self.device) if hasattr(g, 'temporal_features') and g.temporal_features is not None else None,
+                    'batch': g.batch.to(self.device) if hasattr(g, 'batch') and g.batch is not None else None,
+                })
+
+            gd = _mv(graph_data)
+
             result = self.model.forward_once(
-                graph_data.x, graph_data.edge_index,
-                graph_data.temporal_features, graph_data.batch,
+                gd.x, gd.edge_index,
+                gd.temporal_features, gd.batch,
                 return_attention=return_attention
             )
             
             if return_attention:
-                embedding, attention_dict = result  # type: ignore
+                # result may be (embedding, attention)
+                if isinstance(result, tuple) and len(result) >= 2:
+                    embedding, attention_dict = result  # type: ignore
+                else:
+                    embedding = result  # type: ignore
+                    attention_dict = None
+                if isinstance(embedding, tuple):
+                    embedding = embedding[0]
                 return embedding.cpu().numpy(), attention_dict
             else:
                 embedding = result  # type: ignore
+                if isinstance(embedding, tuple):
+                    embedding = embedding[0]
                 return embedding.cpu().numpy()
     
     def authenticate(
