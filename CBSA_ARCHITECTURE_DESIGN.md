@@ -1,675 +1,795 @@
-# CBSA System Architecture Design
-## Continuous Behavioural Session Authentication — Research-Grade Implementation
+# Continuous Behavioral Streaming Authentication (CBSA)
+## Architecture Design — v1
 
-**Version:** 2.0 (Redesigned Layer-2 + New Layer-4)
-**Status:** Production-Grade / Reviewer-Defensible
+---
+
+## Abstract
+
+Continuous Behavioral Streaming Authentication (CBSA) is a real-time identity verification system that authenticates users by analyzing their behavioral patterns across a continuous stream of interaction events. Unlike challenge-based authentication (passwords, PINs, OTPs), CBSA operates passively in the background: every touch gesture, scroll event, typing pattern, and navigation interaction contributes to an ongoing authentication signal that adapts to the user over time without any deliberate user action.
+
+The system is structured as a four-layer processing pipeline. Layer 1 validates and extracts behavioral events from a mobile client over WebSocket. Layer 2 extracts leakage-free drift, stability, and prototype-matching signals using a geometric and statistical model of behavioral identity. Layer 3 runs a Graph Attention Network (GAT) over a temporal behavioral graph to produce a deep session embedding, escalated only when Layer 2 raises uncertainty. Layer 4 combines all signals into a continuous trust score through an Exponential Moving Average model with adaptive coefficient, producing zone-based authentication decisions.
+
+This document describes every component of the system, the mathematical foundations of each design decision, the alternatives considered, and the explicit rationale for each choice.
 
 ---
 
 ## Table of Contents
 
 1. [System Overview](#1-system-overview)
-2. [Critical Bugs Fixed in v2.0](#2-critical-bugs-fixed-in-v20)
-3. [Layer-2: Preprocessing and Behavioural Modelling](#3-layer-2-preprocessing-and-behavioural-modelling)
-4. [Layer-4: Continuous Trust Engine](#4-layer-4-continuous-trust-engine)
-5. [Prototype Quarantine System](#5-prototype-quarantine-system)
-6. [Prototype Lifecycle Management](#6-prototype-lifecycle-management)
-7. [Failure and Edge Case Handling](#7-failure-and-edge-case-handling)
-8. [System Justification — Design Choice Rationale](#8-system-justification--design-choice-rationale)
-9. [Final Architecture Summary](#9-final-architecture-summary)
-10. [Current Implementation Status and Limitations](#10-current-implementation-status-and-limitations)
+2. [Layer 1 — Secure Ingestion](#2-layer-1--secure-ingestion)
+3. [Layer 2 — Behavioral Preprocessing and Prototype Engine](#3-layer-2--behavioral-preprocessing-and-prototype-engine)
+   - 3.1 Session Buffer and Leakage-Free Statistics
+   - 3.2 Drift Computation
+   - 3.3 Stability Score
+   - 3.4 Composite Similarity
+   - 3.5 Prototype Quarantine
+   - 3.6 Adaptive Learning Rate
+   - 3.7 Quality-Based Prototype Lifecycle
+4. [Layer 3 — Graph Attention Network (GAT)](#4-layer-3--graph-attention-network-gat)
+   - 4.1 Behavioral Graph Construction
+   - 4.2 Node Feature Engineering
+   - 4.3 Edge Construction and Windowing
+   - 4.4 SiameseGATNetwork Architecture
+   - 4.5 Triplet Loss Training
+   - 4.6 Inference and Profile Management
+5. [Layer 4 — Trust Engine](#5-layer-4--trust-engine)
+   - 5.1 Raw Trust Signal
+   - 5.2 Adaptive EMA Coefficient
+   - 5.3 Trust Zones and Decisions
+   - 5.4 GAT Escalation Logic
+6. [Storage Architecture](#6-storage-architecture)
+7. [Pipeline Execution Order and Invariants](#7-pipeline-execution-order-and-invariants)
+8. [Evaluation Methodology](#8-evaluation-methodology)
+9. [System Constants Reference](#9-system-constants-reference)
 
 ---
 
 ## 1. System Overview
 
-CBSA is a continuous behavioural authentication system that re-verifies user identity throughout a session by analysing behavioral patterns extracted from device interactions (touch, scroll, keystrokes, accelerometer, gyroscope). The system architecture has four layers:
+```
+Mobile Client
+     |  JSON event stream (WebSocket, ~1 event/s)
+     v
++------------------------------------------------------------------+
+|  Layer 1: Secure Ingestion                                       |
+|  - Field validation  - Vector bounds  - Nonce uniqueness         |
+|  - Monotonic timestamps  - Burst-rate guard                      |
++---------------------------+--------------------------------------+
+                            |  BehaviourEvent
+                            v
++------------------------------------------------------------------+
+|  Layer 2: Preprocessing + Prototype Engine                       |
+|  - Leakage-free drift & stability   - Composite similarity       |
+|  - Quarantine-gated prototype creation                           |
+|  - Adaptive learning rate           - Quality lifecycle          |
++---------------------------+--------------------------------------+
+                            |  PreprocessedBehaviour + PrototypeMetrics
+                            v
+             +--------------+------------------+
+             |  Escalate? (anomaly score)       |
+             |  trust < theta_risk  OR          |
+             |  n_uncertain > threshold         |
+             +----------+----------------------+
+                        |  (conditional)
+                        v
++------------------------------------------------------------------+
+|  Layer 3: GAT Deep Analysis (in-process PyTorch engine)          |
+|  - Temporal behavioral graph  - 56-D node features               |
+|  - Siamese GAT embeddings     - Profile cosine similarity        |
++---------------------------+--------------------------------------+
+                            |  gat_similarity in [0,1]
+                            v
++------------------------------------------------------------------+
+|  Layer 4: Trust Engine                                           |
+|  - EMA trust model with adaptive alpha                           |
+|  - Zone decisions: ACCEPT / MONITOR / CHALLENGE / REJECT         |
+|  - Drift-vs-trust debug logging                                  |
++------------------------------------------------------------------+
+```
+
+**Technology stack:** Python 3.10+, FastAPI, WebSocket, PyTorch, torch_geometric, Azure Cosmos DB (profiles, computation logs, enrollment), Azure Blob Storage (model checkpoints).
+
+**Project layout:**
 
 ```
-Mobile App
-    |
-    v  (WebSocket JSON stream, ~500ms or event-based)
-Layer 1: Secure Ingestion         [app/engine/ingestion.py]
-    |      Validates, extracts, deduplicates events
-    v
-Layer 2: Preprocessing + Modelling [app/engine/preprocessing.py, prototype_engine.py]
-    |      Computes leakage-free drift, stability, similarity; manages prototypes
-    v
-Layer 3: Deep Analysis — GAT      [app/gat/, app/engine/trust_engine.py (escalation)]
-    |      Graph Attention Network on temporal behavioral graph (triggered by Layer-4)
-    v
-Layer 4: Trust Aggregation        [app/engine/trust_engine.py]
-           Continuous EMA trust score, decision zones, Layer-3 escalation logic
+cbsa-backend/
+├── app/
+│   ├── ingestion/        # Layer 1: validate_and_extract
+│   ├── preprocessing/    # Layer 2a: buffer, drift, stability
+│   ├── prototype/        # Layer 2b: similarity, quarantine, lifecycle
+│   ├── gat/              # Layer 3: network, trainer, engine
+│   ├── layer3/           # Layer 3 integration: graph builder, manager
+│   ├── trust/            # Layer 4: EMA trust model, decisions
+│   ├── azure/            # Cosmos DB and Blob Storage wrappers
+│   ├── api/              # FastAPI WebSocket handler
+│   ├── core/             # Constants, invariant checks
+│   ├── logging/          # Structured event logging
+│   ├── models/           # Pydantic data models
+│   └── storage/          # SQLite store, memory store, repository
+├── tests/
+│   ├── runner.py          # End-to-end test scenarios
+│   └── evaluation.py      # FAR / FRR / EER evaluation
+├── docs/
+│   ├── gat/               # GAT architecture documentation
+│   ├── api/               # API specification
+│   └── SETUP.md           # Installation and run guide
+└── data/
+    ├── profiles/           # Local user profile vectors (fallback)
+    ├── behavioral_logs/    # Per-user JSONL event logs
+    ├── checkpoints/        # Local model checkpoints (fallback)
+    └── samples/            # Behavioral sample data for testing
 ```
-
-**Key principle**: Layers 2 and 4 produce measurements and trust scores respectively. Neither layer makes authentication decisions (block/allow). The system outputs a continuous trust score and decision signal for the application layer to act upon.
 
 ---
 
-## 2. Critical Bugs Fixed in v2.0
+## 2. Layer 1 — Secure Ingestion
 
-### Bug 1: Statistical Leakage in Drift Computation (SEVERITY: CRITICAL)
+**File:** `app/ingestion/ingestion.py`
 
-**Original code** (buffer_manager.py):
-```python
-session_state = update_session_buffer(event)   # running_mean updated to include v_t
-short_drift = l2_norm(v_t, session_state.running_mean)  # LEAKAGE
-```
+### Purpose
 
-**Problem**: The `running_mean` was updated WITH the current event `v_t` BEFORE drift was computed. This means drift was measuring distance from a distribution that already included `v_t`. In the extreme case (first event): `running_mean == v_t`, so `short_drift = 0` identically — completely uninformative.
+Layer 1 is the sole entry point for behavioral data. Every event arriving over WebSocket passes through a sequence of deterministic validation checks before any downstream processing begins. Rejection at this layer returns an error response immediately; no state is modified.
 
-**Fix**: `update_session_buffer()` now returns a `PreUpdateSnapshot` capturing all statistics BEFORE incorporating `v_t`. All drift and stability computations use only the snapshot.
+### Validation Checks
 
-```python
-session_state, snapshot = update_session_buffer(event)  # snapshot = pre-update stats
-short_drift = compute_short_drift(v_t, snapshot.short_window_mean)  # No leakage
-```
+The following checks are performed in strict order:
 
-**Mathematical significance**: This is not a minor improvement — it corrects a fundamental data validity violation. Drift computed against a distribution that includes the current sample has no statistical meaning. Every drift measurement in the original system was systematically biased toward zero.
+| # | Check | Rejection Condition |
+|---|-------|---------------------|
+| 1 | Schema validation | Missing required fields: `username`, `session_id`, `timestamp`, `event_type`, `event_data`, `nonce`, `vector` |
+| 2 | Vector dimension | `len(vector) != 48` |
+| 3 | Vector range | Any element outside `[0, 1]` |
+| 4 | Nonce uniqueness | Nonce already seen in this session |
+| 5 | Monotonic timestamp | `timestamp <= last_timestamp` for this session |
+| 6 | Burst-rate guard | `delta_t < 40 ms` for more than 5 consecutive events |
 
----
+### Design Decisions
 
-### Bug 2: Unbounded stability_score Used in Bounded Composite (SEVERITY: HIGH)
+**Why validate nonce uniqueness?**
+Without nonce checking, a replay attack can re-inject a previously captured authentic behavioral event. Since each event produces updates to the prototype engine, repeated authentic events could artificially inflate similarity scores, potentially enabling impersonation by replaying a captured session. The nonce (per-event unique identifier generated by the mobile SDK) makes every event cryptographically distinct.
 
-**Original code** (preprocessing.py, similarity_engine.py):
-```python
-stability_raw = float(np.mean(diffs))   # L2 differences between consecutive events — UNBOUNDED
-stability_score = stability_raw          # not normalized, can be >> 1
-# ...
-score = 0.5 * cosine + 0.3 * (1.0 - normalized_mahalanobis) + 0.2 * stability_score
-```
+**Why 48-dimensional vectors?**
+The 48-dimensional behavioral feature vector is the agreed interface between the mobile SDK and the backend. Each dimension encodes a normalized behavioral signal (touch pressure, scroll velocity, typing cadence components, etc.). The fixed dimensionality is required by all downstream components: drift computation (L2 distance), Mahalanobis distance (diagonal covariance), and GAT node features (56-D = 48 + 8 event-type embedding).
 
-**Problem**: `stability_score` was the raw mean L2 difference between consecutive events — an unbounded quantity that could be 0.001 or 10.0. Using it directly in the composite similarity formula (which expects [0,1] inputs) could produce similarity scores outside [0,1], breaking all downstream comparisons.
+**Why `[0, 1]` range enforcement?**
+All similarity, drift, and stability metrics downstream operate under the assumption that the input space is bounded in `[0,1]^D`. Admitting out-of-range values would break the mathematical bounds guarantees of the composite similarity function and potentially cause numerical overflow in the Mahalanobis distance computation (division by a variance that approaches zero creates amplified sensitivity to out-of-range inputs).
 
-**Fix**: Stability is now defined as:
-```
-S(t) = exp(-(1/D) * sum_i [Var_short,i / max(Var_global,i, eps)])
-```
-This is bounded in (0, 1] by the properties of the exponential function. No clipping required.
+**Why burst-rate guarding?**
+Extremely rapid event injection (sub-40ms inter-event intervals) is inconsistent with human interaction patterns. It indicates either automated replay or fuzzing. The threshold of 40ms reflects the practical lower bound of human touch interaction latency. Sustained bursts (5+ consecutive) are rejected; isolated fast events are tolerated.
 
 ---
 
-### Bug 3: Prototype EMA Variance Update Error (SEVERITY: MEDIUM)
+## 3. Layer 2 — Behavioral Preprocessing and Prototype Engine
 
-**Original code** (prototype_engine.py):
-```python
-alpha = 1.0 / (prototype.support_count + 1)
-old_vector = prototype.vector.copy()
-updated_vector = (1.0 - alpha) * prototype.vector + alpha * current_vector
-updated_variance = (1.0 - alpha) * prototype.variance + alpha * np.square(current_vector - old_vector)
-```
+**Files:** `app/preprocessing/`, `app/prototype/`
 
-**Problem**: The variance update uses `(current_vector - old_vector)^2` — the deviation from the PRE-update mean. Correct EMA variance should use deviation from the POST-update mean:
-```
-sigma^2_EMA = (1 - eta) * sigma^2_old + eta * (x - mu_new)^2
-```
+Layer 2 is the statistical core of CBSA. It extracts three families of behavioral signals from the event stream: *drift* (deviation from the user's established behavioral baseline), *stability* (coherence of the current interaction window), and *prototype similarity* (proximity to the user's behavioral archetypes). These three signals are combined by Layer 4 into the trust score.
 
-Using the pre-update mean overestimates variance because `||x - mu_old|| > ||x - mu_new||` always (the updated mean is closer to x). The bias is small for large n but systematic.
+### 3.1 Session Buffer and Leakage-Free Statistics
 
-Additionally, `alpha = 1/(n+1)` causes the update rate to decay toward zero, effectively freezing mature prototypes and preventing adaptation to legitimate behavioral drift.
+**File:** `app/preprocessing/buffer_manager.py`
 
-**Fix**: Adaptive learning rate `eta(n) = eta_base * exp(-n/tau) + eta_floor` (see Section 6).
+Each user session maintains an in-memory state structure:
 
----
+- **Short window** (`deque`, maxlen=5): the 5 most recent behavioral vectors
+- **Running mean**: online estimate of the session long-term mean `mu_long`, updated via Welford's algorithm
+- **Running M2**: accumulated sum-of-squared deviations
+- **Running variance**: `sigma^2 = M2 / (n-1)` (unbiased estimator)
+- **Sample count** `n`
 
-### Bug 4: Immediate Prototype Creation (SEVERITY: HIGH — Security)
+#### Welford's Online Algorithm
 
-**Original code**: Any behavioral vector with similarity < 0.8 to all existing prototypes immediately became a new prototype.
-
-**Problem**: This is a security vulnerability — a single anomalous event permanently alters the user's behavioral profile. An attacker who gains brief access can inject a prototype that their own behavioral patterns match, facilitating future attacks.
-
-**Fix**: Prototype Quarantine System — see Section 5.
-
----
-
-## 3. Layer-2: Preprocessing and Behavioural Modelling
-
-### 3.1 Leakage-Free Drift Computation
-
-All drift and stability metrics are computed using **pre-update statistics** (captured before `v_t` is incorporated into the running buffers).
-
-**Short-term drift** measures deviation of the current event from recent local context:
+For each incoming sample `x` at count `n`:
 
 ```
-d_short(t) = 1 - exp(-||v_t - mu_window^{t-1}||_2 / (sqrt(D) * sigma))
+delta1 = x - mu_{n-1}
+mu_n   = mu_{n-1} + delta1 / n
+delta2 = x - mu_n
+M2_n   = M2_{n-1} + delta1 * delta2
+sigma^2_n = M2_n / (n - 1)
+```
+
+**Why Welford's over a simple running sum?**
+Computing variance as `sum(x^2)/n - (sum(x)/n)^2` suffers catastrophic cancellation: the two terms can be nearly equal for large n, causing the difference to lose precision. For sessions of up to `MAX_SESSION_EVENTS = 10,000` events with 48-dimensional vectors, numerical accuracy is a practical requirement. Welford's algorithm is equivalent but numerically stable to machine precision regardless of session length.
+
+Reference: Welford, B.P. (1962). "Note on a method for calculating corrected sums of squares and products." *Technometrics*, 4(3), 419-420.
+
+#### The Pre-Update Snapshot (Leakage Prevention)
+
+A fundamental correctness requirement is that `v_t` must not appear in its own reference distribution when drift is computed:
+
+```
+Leakage-free invariant:
+    snapshot = {mu_long^{t-1}, sigma^2^{t-1}, window^{t-1}}  <- BEFORE update
+    update buffer with v_t
+    d_long = ||mu_window^{t-1} - mu_long^{t-1}||             <- no leakage
+```
+
+If the buffer were updated first and then drift computed against the updated statistics, `v_t` would appear on both sides of the distance computation. In the extreme case (first event, n=1), the running mean equals `v_t`, so short_drift would always be exactly zero — completely uninformative.
+
+The `update_session_buffer()` function **atomically** captures the pre-update snapshot and then performs the buffer update, returning both. All metric computations downstream consume only snapshot values. This is enforced architecturally: the `PreUpdateSnapshot` dataclass carries only pre-update fields.
+
+**Window vector asymmetry:** The `window_vector` passed to prototype matching is the *post-update* short window mean. This asymmetry is deliberate: prototype matching asks "what is the user's current behavioral state?" and should include `v_t`, while drift asks "how much has `v_t` deviated from prior context?" and must exclude `v_t` from the reference.
+
+### 3.2 Drift Computation
+
+**File:** `app/preprocessing/drift_engine.py`
+
+Two drift signals are computed from the pre-update snapshot:
+
+**Short drift** — deviation of `v_t` from the recent short window:
+
+```
+d_raw_short = ||v_t - mu_window^{t-1}||_2 / sqrt(D)
+d_short = 1 - exp(-d_raw_short / sigma)
+```
+
+**Long drift** — deviation of the short window from the long-term mean:
+
+```
+d_raw_long = ||mu_window^{t-1} - mu_long^{t-1}||_2 / sqrt(D)
+d_long = 1 - exp(-d_raw_long / sigma)
+```
+
+Both outputs are in `[0, 1)`.
+
+#### Design Decision: `sqrt(D)` Normalization
+
+For a D-dimensional vector in `[0,1]^D`, the maximum possible L2 distance between two points is `sqrt(D)` (the diagonal of the unit hypercube). Dividing by `sqrt(D)` maps the raw distance to `[0, 1]` and makes the metric **dimension-invariant**: a "moderate" drift has the same numerical magnitude regardless of whether D=10 or D=100. Without this normalization, thresholds would need to be re-calibrated for every change in feature dimensionality.
+
+#### Design Decision: Exponential Normalization
+
+Three candidate normalizations were evaluated:
+
+| Approach | Formula | Analysis |
+|----------|---------|---------|
+| Linear clipping | `min(d / d_max, 1)` | Requires choosing `d_max` without principled basis; clips outliers instead of smoothly mapping them |
+| Platt / logistic | `d / (1 + d)` | No natural scale parameter; insensitive at high d (approaches 1 slowly) |
+| Exponential | `1 - exp(-d / sigma)` | Natural scale parameter sigma; smooth; derivative strictly decreasing |
+
+The exponential form was chosen because:
+1. **Interpretable sigma**: Setting `sigma = 0.15 * sqrt(D)` is grounded in the observation that a "moderate" behavioral change shifts features by 0.15 on average across all D dimensions. The L2 of this uniform shift is `0.15 * sqrt(D)`. At `d = sigma`, drift scores `1 - exp(-1) ≈ 0.632` — the one-sigma point. Thresholds have a principled unit interpretation.
+2. **Smooth penalization**: The derivative `exp(-d/sigma)/sigma` is strictly positive and monotonically decreasing. Small deviations produce proportionally smaller scores; extreme deviations approach 1 asymptotically without cliff effects.
+3. **Dimension-awareness**: With `sqrt(D)` pre-normalization, sigma is expressed in normalized units and is thus dimension-invariant across systems.
+
+### 3.3 Stability Score
+
+```
+S(t) = exp(-(1/D) * sum_i [ Var_short_i / max(Var_global_i, eps) ])
 ```
 
 Where:
-- `mu_window^{t-1}`: mean of the last W events, NOT including `v_t` (pre-update)
-- `sqrt(D)` normalization: dimension-invariant scaling (for D=48: sqrt(48) ≈ 6.93)
-- `sigma = 0.15 * sqrt(D) ≈ 1.04`: characteristic drift scale (see Section 8.1)
-- `1 - exp(-·)`: maps [0,∞) → [0,1) monotonically
+- `Var_short_i`: per-dimension variance of the short window
+- `Var_global_i`: per-dimension Welford running variance
+- `eps = 1e-8`: numerical floor
+- Division by `D` provides dimension-invariant normalization
 
-**Long-term drift** measures deviation of local context from global baseline:
+**Interpretation:** S measures the coherence of the current behavioral window relative to the user's established variability:
+- Window variance matches long-term variance (ratio = 1 per dim): `S = exp(-1) ≈ 0.37`
+- Window is highly consistent (ratio << 1): `S -> 1.0`
+- Window is erratic (ratio >> 1): `S -> 0`
 
-```
-d_long(t) = 1 - exp(-||mu_window^{t-1} - mu_global^{t-1}||_2 / (sqrt(D) * sigma))
-```
+**Design decision:**
+Two alternatives were considered:
 
-Where:
-- `mu_global^{t-1}`: Welford's running mean BEFORE this event
-- Both quantities are pre-update — no leakage
+| Approach | Problem |
+|----------|---------|
+| Mean consecutive L2 | Unbounded: the mean L2 between consecutive events can exceed 1.0, breaking the [0,1] guarantee of the composite similarity score |
+| Linear variance ratio | Unbounded when short variance exceeds global variance |
 
-**Why exp normalization over d/(1+d)?**
-- d/(1+d) has no natural scale parameter — it treats d=0.1 and d=1.0 with the same relative sensitivity curve
-- exp(-d/sigma) has sigma as an interpretable scale: at d=sigma, f≈0.63 (one-sigma drift)
-- The exponential tail decays faster for large distances, providing better discrimination of extreme drift events
-- The Platt-scaling form can be adapted per-user by updating sigma from historical drift distributions
-
-### 3.2 Stability Score
-
-The stability score captures within-window behavioral variance relative to the user's established variability:
-
-```
-S(t) = exp(-(1/D) * sum_i [Var_short,i / max(Var_global,i, eps)])
-```
-
-**Interpretation**:
-| Scenario | Effect on S(t) |
-|----------|---------------|
-| Short var << Long var | Ratio ≈ 0 → S(t) ≈ 1 (highly stable) |
-| Short var = Long var | Ratio = 1 → S(t) = exp(-1) ≈ 0.37 (neutral) |
-| Short var >> Long var | Ratio large → S(t) → 0 (erratic) |
-
-**Mathematical guarantee**: S(t) ∈ (0, 1] by construction (exp of non-positive value). No clipping required.
-
-**The 1/D normalization** ensures S(t) is independent of vector dimensionality — a system with D=48 and D=96 features would produce comparable stability scores for behaviorally equivalent patterns.
-
-### 3.3 Behavioural Consistency
-
-Measures directional coherence within the recent window — distinct from stability:
-
-```
-C(t) = (1/|W|) * sum_{v in W} cos(v, mean(W))
-```
-
-**Stability vs Consistency**:
-- **Stability** (S): measures amplitude variance (are the values spread out?)
-- **Consistency** (C): measures directional alignment (do they point the same way?)
-
-An attacker replaying high-amplitude but randomly directed events would show high stability (low variance) but low consistency (scattered directions). These two metrics together provide orthogonal discriminative signals.
+The `exp(-)` transform ensures `S in (0, 1]` by construction, regardless of variance ratios. The global variance denominator personalizes the stability threshold: a naturally high-variance user is not penalized for a moderately variable window.
 
 ### 3.4 Composite Similarity
 
-```
-sim(v, P_k) = 0.50 * cos(v, mu_k) + 0.40 * exp(-d_M(v, mu_k, Sigma_k)/sqrt(D)) + 0.10 * S(t)
-```
+**File:** `app/prototype/similarity_engine.py`
 
-**Component analysis**:
-
-| Component | Formula | Role | Bound |
-|-----------|---------|------|-------|
-| Cosine | cos(v, mu_k) | Behavioral direction | [0,1] |
-| Mahalanobis kernel | exp(-d_M/sqrt(D)) | Distance accounting for variance | (0,1] |
-| Stability | S(t) | Quality modifier | (0,1] |
-
-**Why exp(-d_M/sqrt(D)) for Mahalanobis?**
-
-The standard `d/(1+d)` normalization was used in the original system. The exp kernel is superior because:
-1. **Probabilistic interpretation**: This is an unnormalized Gaussian kernel. The similarity value has a direct probabilistic meaning as an unnormalized likelihood ratio under a Gaussian prototype model.
-2. **sqrt(D) normalization**: For a D-dimensional standard normal vector x, E[||x||_2] ≈ sqrt(D). Dividing by sqrt(D) means that a "typical" random deviation (one standard deviation in each dimension) maps to kernel value exp(-1) ≈ 0.37 — a natural calibration.
-3. **Better tail discrimination**: For large distances, exp(-d) < d/(1+d), providing sharper rejection of highly dissimilar vectors.
-
-**Weight rationale (50/40/10)**:
-- Cosine (0.50): Primary discriminator — captures behavioral direction (the "shape" of the pattern). Scale-invariant.
-- Mahalanobis (0.40): Secondary — captures magnitude deviation accounting for the user's established variability profile. Variance-aware.
-- Stability (0.10): Quality modifier only. Overweighting stability would confuse behavioral quality with behavioral identity.
-
-**Diagonal Mahalanobis approximation**: Full covariance estimation requires O(D²) = O(2304) samples. For streaming sessions with ~10s windows, this is impractical. The diagonal approximation captures per-feature variance without cross-correlation terms, requiring only O(D) = O(48) samples.
-
----
-
-## 4. Layer-4: Continuous Trust Engine
-
-### 4.1 Trust Model
-
-The trust score follows a continuous Exponential Moving Average:
+Given a window vector `v` and a stored prototype `(mu_k, sigma^2_k)`:
 
 ```
-T_t = alpha_t * T_{t-1} + (1 - alpha_t) * R_t
+sim = 0.50 * cos(v, mu_k) + 0.40 * k_M(v, mu_k) + 0.10 * S
 ```
 
-Where:
-- **T_t ∈ [0,1]**: Trust at time t. Initialised to 0.5 (neutral, no information).
-- **T_{t-1}**: Previous trust (temporal memory). Prevents single-event noise from collapsing trust.
-- **R_t ∈ [0,1]**: Raw trust signal from Layer-2 (see below).
-- **alpha_t ∈ [0.30, 0.85]**: Adaptive EMA coefficient (see Section 4.2).
-
-**EMA properties**:
-- Convex combination: `alpha_t * T_{t-1} + (1-alpha_t) * R_t` with both operands in [0,1] guarantees `T_t ∈ [0,1]`
-- Temporal memory: trust cannot collapse instantly from a single anomalous event
-- Gradual recovery: after a false alarm, trust recovers as subsequent events are normal
-
-### 4.2 Raw Trust Signal
-
+**Cosine similarity:**
 ```
-D_t = 0.60 * d_short_t + 0.40 * d_long_t    (composite drift)
-R_t = 0.45 * sim_t + 0.25 * stab_t + 0.30 * (1 - D_t)
+cos(v, mu) = (v . mu) / (||v||_2 * ||mu||_2)    in [-1, 1] -> clipped to [0, 1]
 ```
 
-**Boundary verification**:
-- Maximum: sim=1, stab=1, D=0 → R = 0.45 + 0.25 + 0.30 = 1.0 ✓
-- Minimum: sim=0, stab=0, D=1 → R = 0 + 0 + 0 = 0.0 ✓
-
-**Composite drift weighting (60/40)**:
-- Short drift (0.60): Sudden behavioral changes are more alarming than gradual ones
-- Long drift (0.40): Gradual drift is still a signal but less urgent
-
-**Weight rationale (45/25/30)**:
-- Similarity (0.45): Primary authentication signal — how well does current behavior match the established prototype?
-- Drift complement (0.30): Penalizes behavioral deviation. Second-largest weight reflects importance of catching sudden anomalies.
-- Stability (0.25): Behavioral quality signal. Lower than similarity because stability measures within-window coherence, not between-prototype agreement.
-
-### 4.3 Adaptive EMA Coefficient
-
+**Exp-Mahalanobis kernel:**
 ```
-alpha_t = clip(alpha_max - gamma * d_short_t, alpha_min, alpha_max)
-gamma = alpha_max - alpha_min = 0.55
+d_M(v, mu, sigma^2) = sqrt( sum_i (v_i - mu_i)^2 / max(sigma^2_i, eps) )
+k_M = exp(-d_M / sqrt(D))                         in (0, 1]
 ```
 
-| d_short | alpha_t | EMA half-life |
-|---------|---------|---------------|
-| 0.0 | 0.85 | ~4.3 events (slow, smooth) |
-| 0.5 | 0.575 | ~1.3 events (moderate) |
-| 1.0 | 0.30 | ~0.76 events (fast, responsive) |
+**Stability modifier:** `S in (0, 1]` from Section 3.3
 
-**Half-life formula**: `t_half = -log(2) / log(alpha)`
+**Bounds verification:**
+- Maximum (cos=1, k_M=1, S=1): 0.50 + 0.40 + 0.10 = 1.0
+- Minimum (cos=0, k_M≈0, S≈0): ≈ 0.0
 
-This adaptive mechanism prevents two failure modes:
-1. **Noisy decisions during stable behavior**: high alpha smooths single-event fluctuations
-2. **Slow response to genuine threats**: low alpha ensures rapid trust collapse during sustained anomaly
+All three components are independently bounded in `[0,1]` before combination; the composite output is `[0,1]` without clipping.
 
-### 4.4 GAT Augmentation (Layer-3 Integration)
+#### Design Decision: Three-Component Composite
 
-When Layer-3 provides a GAT similarity score:
+Cosine and Mahalanobis are geometrically orthogonal measures:
+- **Cosine** captures directional agreement — the behavioral "shape" or pattern. Scale-invariant: two vectors of different magnitude but same direction have cosine similarity = 1.
+- **Mahalanobis** captures magnitude deviation scaled by user-specific variance. The same absolute deviation is penalized more for a low-variance user than a high-variance user — matching the intuition that deviations should be judged relative to individual expectations.
+- **Stability** is a quality modifier: a behaviorally coherent window should contribute slightly more to similarity than an erratic one with the same mean.
 
-```
-R_t^aug = (1 - kappa) * R_t + kappa * GAT_t,    kappa = 0.25
-```
+**Why 50/40/10 weights?**
+The dominant weight on cosine (0.50) reflects that behavioral identity is primarily a directional property — two vectors that "point in the same direction" in 48-D behavioral space are likely from the same user. Mahalanobis (0.40) provides strong secondary discrimination. Stability (0.10) is a minor quality adjustment — overweighting it would confuse behavioral consistency with behavioral identity.
 
-**Why kappa = 0.25?**
-- GAT operates on the temporal graph structure of the full session window (~20 events), providing higher-level context than per-event prototype matching
-- However, GAT has higher computational cost and latency — it should refine, not override, Layer-2
-- kappa = 0.25 ensures Layer-2 retains primary authority (75%) while GAT contributes refinement (25%)
-- If GAT is unavailable: R_t is used unchanged. System degrades gracefully.
+#### Design Decision: Exp-Mahalanobis over d/(1+d)
 
-### 4.5 Decision Zones
+| Property | `exp(-d/sqrt(D))` | `d/(1+d)` |
+|----------|-----------------|----------|
+| Probabilistic interpretation | Unnormalized Gaussian kernel (likelihood ratio under Gaussian prototype model) | Logistic/sigmoid |
+| Dimensionality normalization | Explicit sqrt(D) | None |
+| Discriminability at large d | Faster decay | Slow saturation |
+| Gradient | Smooth, C-infinity | Smooth |
 
-| Zone | Condition | Meaning |
-|------|-----------|---------|
-| SAFE | T_t > 0.65 | Behavior matches established profile — session continues |
-| UNCERTAIN | 0.40 ≤ T_t ≤ 0.65 | Ambiguous — may warrant attention or Layer-3 analysis |
-| RISK | T_t < 0.40 | Trust has collapsed — system flags this session |
+The `exp(-d/sqrt(D))` form has a natural probabilistic interpretation and sharper discrimination at large distances, making it more effective at confidently rejecting dissimilar vectors.
 
-**Threshold calibration**:
-- `theta_safe = 0.65`: Requires sustained positive raw signals (sim ≥ 0.9, stab ≥ 0.8, drift ≤ 0.2 for ~3-4 events post-login)
-- `theta_risk = 0.40`: Consistent low-quality behavior over multiple events
-- The gap [0.40, 0.65] is the uncertainty zone — not clearly normal, not clearly threatening
+#### Design Decision: Diagonal Mahalanobis
 
-### 4.6 Layer-3 Escalation Logic
+Full covariance estimation for D=48 requires at minimum O(D^2) = 2,304 samples for the covariance matrix to be non-singular and well-conditioned. In streaming authentication with sessions of 20-100 events per prototype, full covariance estimation is impractical. The diagonal approximation:
+1. Requires only D samples per prototype for reliable estimation
+2. Captures per-feature variance (important: touch pressure and scroll velocity have very different natural variances)
+3. Is exact when features are uncorrelated — a reasonable approximation for well-designed behavioral features
 
-**Why not periodic GAT?** The original system ran GAT every `GAT_INFERENCE_INTERVAL_SECONDS` regardless of trust state. This is wasteful (unnecessary compute during stable sessions) and slow (anomalous behavior detected at second 1 waits until second N).
+### 3.5 Prototype Quarantine
 
-**Event-driven escalation triggers** (any one sufficient):
+**File:** `app/prototype/quarantine_manager.py`
 
-1. **RISK zone** (`T_t < 0.40`): Trust has collapsed — immediate deep analysis required.
-2. **UNCERTAIN + elevated anomaly** (`0.40 ≤ T_t ≤ 0.65` AND `anomaly_indicator > 0.40`): Uncertain zone with elevated anomaly signal — potential threat.
-3. **Sustained uncertainty** (`consecutive_uncertain >= 3`): System cannot resolve the situation through Layer-2 alone — GAT needed.
+When composite similarity falls below `THRESHOLD_CREATE = 0.50`, the behavioral vector enters a **CandidatePool** rather than immediately creating a new prototype. A CandidatePrototype is promoted to a full Prototype only when all three conditions are simultaneously satisfied:
 
-**Escalation suppression**: Re-check interval of 30 seconds prevents GAT from being called on every uncertain event when trust fluctuates near the boundary.
+| Condition | Parameter | Value | Rationale |
+|-----------|-----------|-------|-----------|
+| Observation count | `N_MIN` | 3 | A single deviating event cannot create a prototype |
+| Temporal spread | `T_MIN` | 30s | Burst events within a short window cannot satisfy count alone |
+| Consistency | `CONSISTENCY_THRESHOLD` | 0.72 | Mean cosine to centroid >= 0.72, requiring directional agreement (angle <= 44 degrees in 48-D space) |
 
-**Anomaly indicator** (from Layer-2):
-```
-anomaly(t) = (1 - sim_t) * (0.5 + 0.5 * d_short_t)
-```
+Candidates expire after `T_EXPIRE = 600s` if not promoted.
 
-The 0.5 base weight captures anomalies where drift is low but similarity fails (e.g., replay attacks that don't deviate from behavioral norms but use different interaction patterns).
+#### Design Decision: Why N_MIN = 3?
 
----
+One observation: trivially noise. Two observations: statistically insufficient for a 48-dimensional centroid estimate. Three observations provide a minimal centroid and allow consistency to be computed against a non-trivial average. Three is the minimum count that makes all three conditions jointly non-trivial (count, temporal spread, and consistency each play a distinct role).
 
-## 5. Prototype Quarantine System
+#### Design Decision: Why T_MIN = 30 seconds?
 
-### 5.1 Motivation
+Human interaction patterns emerge across minutes of natural device use, not seconds. A 30-second spread means the user must have been naturally interacting for at least half a minute before a new behavioral archetype is accepted. This defeats burst-injection attacks: an attacker who rapidly submits multiple crafted events cannot satisfy the temporal spread requirement without sustaining the attack across 30 seconds of interaction.
 
-Without quarantine, the original system could be exploited through **prototype injection**:
-1. Attacker gains momentary access (e.g., while owner is briefly away)
-2. Attacker performs a single behavioral interaction that differs from the owner's profile
-3. This creates a new prototype matching the attacker's behavior (similarity < 0.8 → new prototype)
-4. Attacker can now pass authentication against their own injected prototype
+#### Design Decision: Why Consistency >= 0.72?
 
-The quarantine system makes this attack infeasible: a single event cannot create a prototype.
+In 48-dimensional space, cosine similarity of 0.72 corresponds to an inter-vector angle of `arccos(0.72) ≈ 44 degrees`. Requiring mean cosine to centroid >= 0.72 means all observations assigned to a candidate must lie within a 44-degree cone in behavioral space. This threshold is:
+- **Permissive enough** for natural behavioral variation within a consistent context (same task, similar environment)
+- **Restrictive enough** to reject observations from fundamentally different behavioral modes
 
-### 5.2 Quarantine Protocol
+#### Security Consequence
 
-All new behavioral patterns enter a **CandidatePool** (in-memory, per-user). Promotion to a full prototype requires satisfying ALL three criteria simultaneously:
+Without quarantine, an attacker with momentary physical access needs O(1) events to inject a new behavioral archetype. With quarantine, the cost rises to at least 3 events spread over 30+ seconds with consistent behavioral pattern — a substantially higher bar that requires sustained, coherent behavioral mimicry.
 
-```
-1. Observation Count:  count >= 3
-2. Temporal Spread:    time_span >= 30 seconds
-3. Consistency:        mean_cosine_to_centroid >= 0.72
-```
+### 3.6 Adaptive Learning Rate
 
-**Criteria rationale**:
+**File:** `app/prototype/prototype_engine.py`
 
-| Criterion | Value | Why |
-|-----------|-------|-----|
-| count >= 3 | 3 | Minimum for statistical validity; prevents single-event injection |
-| time_span >= 30s | 30 | Natural interaction episodes span 30-60s; prevents burst injection |
-| consistency >= 0.72 | 0.72 | Mean inter-vector angle ≤ 44° in 48-D space; strong directional agreement |
-
-### 5.3 Candidate Assignment
-
-A new vector `v` is assigned to existing candidate `C_j` if:
-```
-cos(v, centroid_j) >= 0.75
-```
-
-Higher threshold than promotion consistency (0.72) because assignment must be confident — if a vector weakly resembles a candidate, creating a new candidate is preferable to contaminating an existing one.
-
-### 5.4 Candidate Expiry
-
-Candidates inactive for > 600 seconds (10 minutes) are silently deleted. This prevents:
-- Memory growth from abandoned behavioral patterns
-- Slow accumulation of old noise toward promotion threshold
-
----
-
-## 6. Prototype Lifecycle Management
-
-### 6.1 Adaptive Learning Rate
+Prototype updates use Exponential Moving Average (EMA) with an exponentially decaying learning rate:
 
 ```
 eta(n) = eta_base * exp(-n / tau) + eta_floor
+
+mu_new        = (1 - eta) * mu_old + eta * v
+sigma^2_EMA   = (1 - eta) * sigma^2_old + eta * (v - mu_new)^2
+sigma^2_final = 0.7 * sigma^2_EMA + 0.3 * sigma^2_session
 ```
 
-**Parameters**: eta_base = 0.30, tau = 50, eta_floor = 0.01
+Parameters: `eta_base = 0.30`, `tau = 50`, `eta_floor = 0.01`
 
-| n (support count) | eta(n) | Behavior |
-|-------------------|--------|----------|
-| 0 | 0.31 | Fast learning (new prototype) |
-| 10 | 0.21 | Moderate |
-| 50 | 0.12 | Slowing |
-| 100 | 0.041 | Slow but not frozen |
-| inf | 0.01 | Floor — never completely frozen |
+| n | eta |
+|---|-----|
+| 0 | 0.31 |
+| 10 | 0.133 |
+| 50 | 0.121 |
+| 100 | 0.011 |
+| inf | 0.01 |
 
-**Update rule**:
-```
-mu_new = (1 - eta) * mu_old + eta * v
-sigma^2_new = (1 - eta) * sigma^2_old + eta * (v - mu_new)^2
-sigma^2_blended = 0.70 * sigma^2_EMA + 0.30 * sigma^2_session
-```
+**Why decaying rate with a floor?**
 
-The 70/30 blending of EMA variance with session variance prevents prototype variance from becoming arbitrarily narrow (which would make the Mahalanobis metric overly sensitive to normal behavioral fluctuations).
+A constant high rate risks prototype drift from behavioral noise. A constant low rate prevents adaptation to genuine long-term behavioral change. The decaying schedule resolves this naturally: new prototypes need fast early calibration (high eta at small n), while mature prototypes should resist noise (low eta at large n). The floor `eta_floor = 0.01` prevents asymptotic freezing: even a prototype with n=10,000 still adapts at rate 0.01, allowing genuine long-term behavioral evolution to propagate through the model.
 
-**Comparison with original alpha = 1/(n+1)**:
+**Why variance blending (0.7 EMA + 0.3 session)?**
 
-| n | Original alpha | New eta(n) |
-|---|---------------|------------|
-| 1 | 0.500 | 0.307 |
-| 10 | 0.091 | 0.213 |
-| 100 | 0.010 | 0.041 |
-| 1000 | 0.001 | **0.010** (floor) |
+The EMA variance update can shrink arbitrarily small if the prototype receives repeatedly similar vectors. An extremely small prototype variance makes the Mahalanobis distance hypersensitive: tiny deviations produce very large distances, causing false rejection. Blending 30% of the current session's Welford variance maintains calibration to actual current behavioral variability, preventing the prototype from overfitting to a narrow region of behavioral space.
 
-The original system effectively froze prototypes at n=100+ (alpha ≈ 0.01 and decreasing). The new system maintains a minimum adaptation rate (eta_floor=0.01), allowing legitimate long-term behavioral drift to be incorporated.
-
-### 6.2 Prototype Matching Thresholds
-
-| Threshold | Value | Action |
-|-----------|-------|--------|
-| THRESHOLD_UPDATE | 0.75 | sim >= 0.75: update existing prototype |
-| THRESHOLD_CREATE | 0.50 | sim < 0.50: route to quarantine |
-| Dead zone | [0.50, 0.75) | No action — re-evaluate next event |
-
-**Why a dead zone?**
-
-The original system had an undefined gap: similarity < 0.8 created a new prototype, but there was no logic for the range where behavior is moderately similar. The dead zone [0.50, 0.75) prevents prototype corruption via "boundary attack" — repeatedly submitting vectors at similarity ≈ 0.76 would continuously update the prototype in the original system, causing drift. Now they fall in the dead zone and are ignored.
-
-### 6.3 Quality-Based Prototype Deletion
-
-When `MAX_PROTOTYPES_PER_USER` (15) is reached, the prototype with lowest quality score is deleted:
+### 3.7 Quality-Based Prototype Lifecycle
 
 ```
 Q(k) = log(1 + n_k) * exp(-lambda_age * age_k) * max(sim_k, 0.1)
 ```
 
 Where:
-- `log(1 + n_k)`: logarithmic support (diminishing returns for very high counts)
-- `exp(-lambda_age * age_k)`: age decay (lambda = 1/day, so week-old prototype ≈ 0.001x)
-- `max(sim_k, 0.1)`: similarity relevance (0.1 floor prevents total zeroing of low-sim prototypes)
+- `n_k`: support count (events matched to prototype k)
+- `age_k`: seconds since last update
+- `sim_k`: best composite similarity in the current batch
+- `lambda_age = 1/86400` (one-day half-life)
 
-**Why better than original (delete by lowest support_count)?**
+When the maximum prototype count (`MAX_PROTOTYPES = 15`) is reached, the prototype with the lowest Q score is removed.
 
-The original deleted prototypes with the lowest support count. This would delete newly created prototypes that represent the user's **current** behavior — exactly the most relevant prototypes. The quality score balances recency, support, and relevance, preferring to delete old, rarely-matched, low-support prototypes.
+**Component rationale:**
 
----
+| Component | Formula | Effect |
+|-----------|---------|--------|
+| Support | `log(1+n)` | Logarithmic returns: establishes that 100 obs is valuable but not 10x more than 10 |
+| Recency | `exp(-lambda*age)` | A prototype unmatched for 1 day has Q reduced by exp(-1) ≈ 0.37; 7 days: exp(-7) ≈ 0.001 |
+| Relevance | `max(sim, 0.1)` | Prototype not matching current behavior scores lower (min 0.1 prevents zero) |
 
-## 7. Failure and Edge Case Handling
-
-### 7.1 Cold Start (New User)
-
-| Phase | System Behavior |
-|-------|----------------|
-| First event | Routes to quarantine; similarity_score = 0.0; trust_score = 0.5 |
-| Events 1-2 (< N_MIN) | Quarantine accumulates; similarity = 0; trust stays ~0.5 |
-| After 30s + 3 observations + consistency pass | First prototype created; system begins matching |
-
-**Trust during cold start**: The initial trust T_0 = 0.5 represents genuine uncertainty. With similarity=0 and no prototypes, R_t ≈ 0.30 (from drift complement only). Trust drifts toward ~0.40-0.45 — UNCERTAIN zone. This is correct: the system should not trust an unestablished session.
-
-### 7.2 Legitimate Behavioural Drift
-
-A user's behavior naturally evolves over time (different grip, new device, changed habits).
-
-**Detection**: Long drift `d_long(t)` increases gradually as `mu_window` diverges from `mu_global`. This elevates Layer-4's composite drift and reduces trust modestly.
-
-**Adaptation**: The adaptive learning rate (eta_floor = 0.01) ensures prototypes slowly incorporate genuine drift. Over N events, the prototype centroid shifts toward the new behavioral pattern.
-
-**Threshold resilience**: Fixed global thresholds (0.75, 0.50) could falsely flag legitimate drift. The planned per-user adaptive thresholds (Section 10) would derive thresholds from historical similarity distributions, accommodating users with naturally higher behavioral variability.
-
-### 7.3 Attacker Mimicry
-
-An attacker who observes the user's behavioral patterns may attempt to replicate them.
-
-**Layer-2 defense**:
-- Behavioral vectors are 48-dimensional — perfect mimicry requires matching all dimensions simultaneously
-- The Mahalanobis component penalizes vectors that deviate from the user's established variance profile — even "close" mimicry fails if the attacker's variance pattern differs
-- The anomaly indicator `(1-sim)*(0.5 + 0.5*d_short)` captures partial mimicry: high similarity with anomalous drift still produces elevated anomaly
-
-**Layer-4 defense**:
-- Trust EMA provides temporal memory — sustained mimicry under scrutiny is required, not a single successful event
-- Escalation to Layer-3 (GAT) provides structural analysis of the behavioral session graph that is much harder to mimic than individual event vectors
-
-### 7.4 Rapid Interaction Bursts
-
-High-frequency events (e.g., rapid touch sequence during scrolling) could cause instability.
-
-**Handling**:
-- Short window (W=5): The short window mean quickly incorporates burst events; stability score drops
-- Adaptive alpha: High short_drift during a burst lowers alpha_t → faster trust response
-- Dead zone: Burst-induced borderline similarity doesn't trigger spurious prototype creation
-- The ingestion layer (Layer-1) has `fast_delta_count` tracking for rate limiting (existing)
-
-### 7.5 Missing Layer-3 Output
-
-GAT output is optional throughout the system.
-
-- `gat_similarity = None` is explicitly handled in `trust_engine.update_trust()`
-- When GAT is unavailable, `R_t` is used unchanged (kappa = 0, effectively)
-- This graceful degradation means Layer-3 failures do not affect Layer-2 or Layer-4 operation
-- Logged with `gat_augmented = False` in TrustResult for monitoring
+A freshly created prototype (n=1) with recent age and good relevance scores higher than an old high-support prototype that no longer matches current behavior. This keeps the prototype set tuned to the user's current behavioral state rather than their historical one.
 
 ---
 
-## 8. System Justification — Design Choice Rationale
+## 4. Layer 3 — Graph Attention Network (GAT)
 
-### 8.1 Why sigma = 0.15 * sqrt(D) for exp-normalization?
+**Files:** `app/gat/`, `app/layer3/`
 
-Behavioral vectors are in [0,1]^48. A "moderate" behavioral change might shift an average feature by 0.15 (15% of the normalized range). The L2 of a uniform 0.15 shift across all 48 dimensions is:
+Layer 3 provides deep session-level behavioral authentication through a Graph Attention Network operating on a temporal behavioral graph. This component was designed and implemented by the GAT team member.
+
+### 4.1 Behavioral Graph Construction
+
+Each behavioral session window is represented as a temporal graph `G = (V, E)` where:
+- **Nodes V**: individual behavioral events within the last 20-second sliding window
+- **Edges E**: temporal relationships between events, governed by the edge construction rule
+
+The 20-second window captures a meaningful unit of user interaction — sufficient events for the GAT to recognize complex interaction sequences — while remaining responsive to behavioral change.
+
+### 4.2 Node Feature Engineering
+
+Each node (event) is represented as a **56-dimensional feature vector**:
+
+| Dimensions | Source | Description |
+|------------|--------|-------------|
+| 0-47 | `event_data.vector` | 48-D behavioral vector from mobile SDK |
+| 48-55 | Hash embedding | 8-byte event-type encoding: `sha256(event_type)[:8]` |
+
+**File:** `app/layer3/layer3_processor.py`
+
+**Why hash embedding over one-hot encoding?**
+One-hot encoding requires a fixed, known vocabulary of event types. As new event types are introduced, the embedding dimension grows and the model must be retrained. Hash embeddings are fixed-size regardless of vocabulary size. Additionally, semantically related event type names (e.g., `scroll_up` / `scroll_down`) receive nearby hash codes, providing an implicit soft-similarity signal.
+
+### 4.3 Edge Construction and Windowing
+
+**Windowing:** All events within the last 20 seconds are included; no event-count truncation.
+
+**Edge rule:** For each source node `i`:
+
+```python
+for each event i in events:
+    seen = { event[i].type }
+    for j in range(i+1, end):
+        connect(i, j)           # always connect, including repeats
+        if event[j].type not in seen:
+            seen.add(event[j].type)
+            if len(seen) >= 4:  # stop after 4 distinct new types
+                break
+```
+
+Key properties:
+- **Repeat-inclusive**: duplicate event types are always connected; they do not count toward the distinct-type limit
+- **Distinct-4 termination**: fan-out from node `i` stops after 4 distinct *new* event types are encountered
+- **Result**: edges from a node can exceed 4, because repeats do not consume the distinct quota
+
+Repeat-inclusive connectivity is intentional: repetitive behavioral patterns (e.g., repeated scrolls) are identity-bearing signals. The distinct-4 limit prevents over-connected graphs in high-variety event streams while preserving enough context for multi-type pattern recognition.
+
+### 4.4 SiameseGATNetwork Architecture
+
+**File:** `app/gat/gat_network.py`
+
+The GAT model uses a **Siamese architecture**: the session graph and the user's reference profile are both processed through a shared-weight encoder, and the outputs are compared via cosine similarity.
 
 ```
-||delta||_2 = 0.15 * sqrt(48) ≈ 1.04
+Input:   G_session (56-D node features)
+         G_profile  (stored 64-D embedding per user)
+
+Encoder (shared weights):
+  GATConv(56 -> 128, heads=4)   concat  -> 512-D
+  GATConv(512 -> 128, heads=4)  mean    -> 128-D
+  Global mean pooling                   -> 128-D
+  Linear(128 -> 64)                     -> 64-D session embedding
+
+Score:   cosine_similarity(session_emb, profile_emb) in [0, 1]
 ```
 
-After dimension normalization: `d_norm = 1.04 / sqrt(48) = 0.15`
-After exp-normalization: `1 - exp(-0.15/sigma) = 1 - exp(-1) ≈ 0.63`
+**Why GAT over GCN?**
+Graph Convolutional Networks apply uniform weight to all neighbors. Graph Attention Networks learn per-edge attention weights, allowing the model to focus on the most identity-discriminative temporal transitions. In behavioral authentication, not all event transitions carry equal identity signal — transitions between certain event type pairs are more characteristic than others. GAT learns which transitions matter, without requiring manual feature engineering of these distinctions.
 
-This gives the intuition: a "moderate" behavioral shift (15% per feature) maps to `d_normalized ≈ 0.63`. Extreme shifts (50%+) approach 1.0. Minor fluctuations (2-3%) remain near 0.
+**Why Siamese architecture?**
+The Siamese network is the standard architecture for similarity learning under the constraint that the two inputs belong to the same class of objects (both are behavioral sessions). Sharing encoder weights ensures that the session embedding and profile embedding live in the same metric space. Cosine similarity in this learned space provides a scale-invariant, bounded similarity score without requiring additional calibration.
 
-**Future**: sigma should be adapted per-user from historical drift distributions — larger sigma for naturally variable users, smaller for consistent users.
+### 4.5 Triplet Loss Training
 
-### 8.2 Why Quarantine Instead of Direct Prototype Creation?
+**File:** `app/gat/trainer.py`
 
-Three independent justifications:
+The model is trained with triplet loss across users in the behavioral log store:
 
-1. **Statistical**: A single observation provides no statistical confidence about a behavioral pattern's validity. The mean of 1 observation = the observation itself — no information about variance or stability.
-
-2. **Security**: See Section 5.1. Single-event injection is a viable attack against direct creation.
-
-3. **Quality**: Transient behavioral patterns (distraction, accidental gesture) should not become permanent reference points. The consistency requirement (≥ 0.72 cosine similarity across observations) ensures only coherent, repeatable patterns are promoted.
-
-**Why not require more observations (e.g., 10)?** 3 observations balances security (prevents injection) with enrollment speed. A user exploring a new UI feature would produce 3 observations relatively quickly during normal interaction.
-
-### 8.3 Why Adaptive Thresholds Instead of Fixed?
-
-Users exhibit significantly different behavioral consistency levels:
-- A touch typist has highly consistent keypress patterns → tight prototype clusters → high similarity scores
-- A casual smartphone user has variable behavior → loose clusters → lower similarity scores
-
-A fixed threshold of 0.75 might be appropriate for the typist but far too strict for the casual user (constant false positives). Per-user thresholds derived from historical similarity distributions:
 ```
-theta_update(u) = mu_sim(u) - 1.5 * sigma_sim(u)
-theta_create(u) = mu_sim(u) - 3.0 * sigma_sim(u)
+L = max(0, d(anchor, positive) - d(anchor, negative) + margin)
+
+d(a, b) = 1 - cosine_similarity(a, b)
+margin = 0.5
 ```
 
-These place thresholds at 1.5 and 3 standard deviations below the user's mean similarity — statistically principled rejection regions.
+Where:
+- **Anchor**: a session graph from user U
+- **Positive**: another session graph from user U
+- **Negative**: a session graph from a different user V
 
-**Current status**: Global default thresholds are used (0.75, 0.50) pending sufficient historical data. Implementation plan in Section 10.
+Training: 30 epochs across all available users. After training, the checkpoint is persisted to Azure Blob Storage (`cbsa-models` container).
 
-### 8.4 Why Separate Modelling and Decision Layers?
+**Why triplet loss?**
+Triplet loss directly optimizes the objective of authentication: same-user sessions should be closer than different-user sessions by at least `margin` in the learned embedding space. This is a direct optimization target, unlike cross-entropy classification which requires a fixed user set at training time and generalizes poorly to unseen users.
 
-Combining behavioral modeling (prototype matching) and trust decisions in the same component creates several problems:
-1. **Coupling**: Changes to the prototype system would require re-validating decision logic, and vice versa
-2. **Multi-source aggregation**: Layer-4 must combine Layer-2 and Layer-3 outputs — this is impossible if Layer-2 makes decisions internally
-3. **Temporal state**: Trust is fundamentally a session-level temporal quantity (EMA over events), while prototype matching is event-level — these have different lifecycles
-4. **Testability**: The trust engine can be unit-tested with synthetic metrics, independent of the prototype system
+### 4.6 Inference and Profile Management
 
-The clean interface between Layer-2 (produces PrototypeMetrics) and Layer-4 (consumes them) allows either layer to be evolved independently.
+**Files:** `app/gat/engine.py`, `app/layer3/layer3_manager.py`
 
-### 8.5 Why EMA for Trust Instead of a Direct Score?
+At inference time:
+1. The 20-second event window is converted to a graph by `layer3_processor.py`
+2. The GAT encoder produces a 64-D session embedding
+3. The user's stored 64-D profile vector (Cosmos DB / local disk fallback) is retrieved
+4. Score: `gat_score = cosine_similarity(session_emb, profile_emb)` in `[0, 1]`
 
-A direct trust score (e.g., current similarity_score as trust) would:
-- Be maximally volatile: one low-similarity event collapses trust instantly
-- Provide no temporal memory: a single good event would fully restore trust after an anomaly
-- Not reflect behavioral trajectory: a user with consistently declining similarity (concerning) would look identical to one with stable high similarity followed by one normal dip
+If no profile exists, the current embedding is stored as the initial profile. Profiles are updated via EMA after each inference call.
 
-The EMA provides:
-- **Temporal smoothing**: Trust reflects the trend, not a single point
-- **Memory**: Anomalies must be sustained to collapse trust
-- **Trajectory tracking**: Gradually declining similarity produces gradually declining trust
+**Adaptive kappa — contribution weight:**
+
+```
+kappa = clip(0.10 + 0.30 * (1 - trust_score), 0.10, 0.40)
+```
+
+When trust is high (0.9), `kappa = 0.13` — GAT contributes minimally, preserving the Layer 2 signal.
+When trust is low (0.2), `kappa = 0.34` — GAT is weighted more heavily to provide deep analysis.
+
+This prevents GAT from overriding a well-established trust signal while amplifying its influence precisely when Layer 2 is uncertain.
 
 ---
 
-## 9. Final Architecture Summary
+## 5. Layer 4 — Trust Engine
 
-### Pipeline Overview
+**File:** `app/trust/trust_engine.py`
 
-```
-Event Received (48-D vector)
-    |
-    v [Layer 1: ingestion.py]
-    Validate, deduplicate (nonce), extract BehaviourEvent
-    |
-    v [Layer 2a: preprocessing.py + buffer_manager.py]
-    1. Capture PreUpdateSnapshot (pre-update stats — no leakage)
-    2. Update session buffers (Welford's algorithm)
-    3. Compute: short_drift, long_drift, stability_score, behavioural_consistency
-    4. Produce: PreprocessedBehaviour (6 fields)
-    |
-    v [Layer 2b: prototype_engine.py]
-    5. Retrieve user prototypes from store
-    6. Compute composite similarity (cosine + Mahalanobis kernel + stability)
-    7. Identify best matching prototype
-    8. If sim >= 0.75: update prototype (adaptive EMA)
-       If sim < 0.50: route to quarantine_manager
-       Else: dead zone, no action
-    9. Compute 9-field PrototypeMetrics (no decisions)
-    |
-    v [Layer 4: trust_engine.py]
-    10. Retrieve per-session TrustState
-    11. Compute raw signal R_t = 0.45*sim + 0.25*stab + 0.30*(1-D_composite)
-    12. Optional GAT augmentation: R_t^aug = 0.75*R_t + 0.25*GAT_t
-    13. Adaptive alpha_t = clip(0.85 - 0.55*d_short, 0.30, 0.85)
-    14. EMA update: T_t = alpha_t * T_{t-1} + (1-alpha_t) * R_t
-    15. Classify: SAFE (>0.65) | UNCERTAIN (0.40-0.65) | RISK (<0.40)
-    16. Determine escalation: trigger GAT if RISK, UNCERTAIN+high anomaly, or consecutive uncertain >= 3
-    17. Return TrustResult
-    |
-    v [Optional Layer 3: gat_engine.py]
-    18. If escalated: build temporal graph, run GAT inference
-    19. Return GAT similarity score → fed back to Layer-4 (augmentation)
-    |
-    v [Response to client]
-    {
-      // Layer-2 rich output
-      similarity_score, short_drift, long_drift, stability_score,
-      prototype_confidence, behavioural_consistency,
-      prototype_support_strength, anomaly_indicator, matched_prototype_id,
-      // Layer-4 output
-      trust_score, decision, escalated_to_layer3, raw_trust_signal
-    }
-```
+Layer 4 aggregates the complete behavioral signal into a continuous trust score via an Exponential Moving Average model with adaptive coefficient, and issues zone-based authentication decisions.
 
-### Layer Responsibilities
-
-| Layer | Module(s) | Responsibility | Makes Decisions? |
-|-------|-----------|----------------|-----------------|
-| Layer 1 | ingestion.py | Validate, deduplicate, extract | No — rejects invalid only |
-| Layer 2a | preprocessing.py, buffer_manager.py, drift_engine.py | Drift, stability, consistency computation | No |
-| Layer 2b | prototype_engine.py, similarity_engine.py, quarantine_manager.py | Prototype matching, update, lifecycle | No |
-| Layer 3 | gat_engine.py, gat_network.py, layer3_manager.py | Deep temporal graph analysis | No |
-| Layer 4 | trust_engine.py | Trust aggregation, decision zones, GAT escalation | YES — outputs SAFE/UNCERTAIN/RISK |
-
-### Data Flow (Types)
+### 5.1 Raw Trust Signal
 
 ```
-BehaviourEvent (ingestion)
-    -> PreprocessedBehaviour (preprocessing)
-    -> PrototypeMetrics (prototype_engine)
-    -> TrustResult (trust_engine)
-    -> JSON response (WebSocket)
+R_t = w_sim * sim_t + w_stab * S_t + w_drift * (1 - D_t)
+
+D_t = 0.60 * d_short_t + 0.40 * d_long_t    (composite drift)
+
+Weights:  w_sim = 0.45,  w_stab = 0.25,  w_drift = 0.30
 ```
+
+**Bounds verification:**
+- Maximum (sim=1, S=1, D=0): 0.45 + 0.25 + 0.30 = 1.0
+- Minimum (sim=0, S=0, D=1): 0 + 0 + 0 = 0.0
+
+`R_t in [0, 1]` without clipping, by construction.
+
+**Weight rationale:**
+
+| Signal | Weight | Rationale |
+|--------|--------|-----------|
+| Similarity | 0.45 | Primary identity signal: how well does current behavior match the stored prototype? |
+| Drift-complement | 0.30 | Penalizes behavioral deviation. Short drift weighted 60%, long drift 40%: sudden changes are more alarming than gradual drift. |
+| Stability | 0.25 | Behavioral coherence quality. Lower weight: stability captures *how consistently* the user behaves, not *who* they are. |
+
+**Why drift-complement `(1 - D_t)` rather than raw drift?**
+Using `(1 - D_t)` inverts the drift signal so all three terms contribute positively to trust: zero drift contributes +0.30; maximal drift contributes 0. This keeps the weight interpretation uniform — each term is a "trust evidence" component.
+
+**Why 60/40 short/long drift split?**
+Short drift captures sudden single-event deviations — the strongest signal of an impostor who cannot perfectly replicate the user's fine-grained micro-behavioral patterns. Long drift captures gradual session-level drift — a weaker but relevant signal of context change. Short-term deviations are weighted more heavily because they are the more alarming signal.
+
+### 5.2 Adaptive EMA Coefficient
+
+```
+alpha_t = clip(alpha_max - gamma * d_short_t, alpha_min, alpha_max)
+gamma   = alpha_max - alpha_min = 0.55
+
+alpha_min = 0.30,  alpha_max = 0.85
+
+T_t = alpha_t * T_{t-1} + (1 - alpha_t) * R_t
+```
+
+| d_short | alpha | EMA half-life |
+|---------|-------|---------------|
+| 0.0 (stable) | 0.85 | ~4.3 events |
+| 0.5 (moderate) | 0.575 | ~1.3 events |
+| 1.0 (extreme) | 0.30 | ~0.57 events |
+
+**Design rationale:**
+Alpha encodes resistance to trust change — the EMA half-life. Making alpha a function of `d_short` implements a principled speed-accuracy trade-off:
+- Stable behavior (d_short ≈ 0): `alpha = 0.85`, strong temporal inertia. A single anomalous event does not immediately drop trust for a well-established session.
+- Sudden anomaly (d_short ≈ 1): `alpha = 0.30`, fast response. A sustained impostor who produces high short drift is rejected within 1-2 events rather than waiting for the EMA to propagate over many events.
+
+**Why linear dependency on d_short?**
+A linear coupling `alpha = alpha_max - gamma * d_short` is the simplest monotone function that spans the full `[alpha_min, alpha_max]` range. Nonlinear alternatives (e.g., sigmoid coupling) would introduce an additional shape parameter without clear benefit, and the linear function has a direct interpretation: each unit of short drift reduces alpha by exactly gamma.
+
+### 5.3 Trust Zones and Decisions
+
+| Zone | Trust Range | Decision | Meaning |
+|------|-------------|----------|---------|
+| SAFE | `[theta_safe, 1.0]` | ACCEPT | Strong behavioral match |
+| MONITOR | `[theta_risk, theta_safe)` | LOG | Mild deviation, passive monitoring |
+| RISK | `[0, theta_risk)` | REJECT | Sustained behavioral anomaly |
+| WARMUP | (any) | WARMUP | Insufficient data, n < WARMUP_SKIP_EVENTS |
+
+`theta_safe = 0.80`, `theta_risk = 0.40`
+
+The MONITOR dead-zone `[0.40, 0.80)` provides hysteresis: trust scores oscillating near a single threshold do not produce alternating ACCEPT/REJECT decisions. Continuous authentication without hysteresis produces unstable, annoying decisions for legitimate sessions with natural behavioral variance.
+
+### 5.4 GAT Escalation Logic
+
+GAT analysis is triggered conditionally, not periodically:
+
+```python
+should_escalate = (
+    anomaly_indicator > ANOMALY_ESCALATION_THRESHOLD    # = 0.40
+    OR n_consecutive_uncertain > N_UNCERTAIN_ESCALATION   # = 3
+)
+AND (time_since_last_gat > T_RECHECK_SECONDS)           # = 30s
+```
+
+**Why event-driven over periodic?**
+- **Efficiency**: Stable sessions (high trust, low drift) do not warrant deep GAT analysis. Periodic GAT wastes compute on unnecessary inference.
+- **Responsiveness**: An anomaly triggers GAT at the moment the anomaly indicator exceeds the threshold, not at a fixed future interval.
+- **Recheck cooldown**: The 30-second minimum interval between GAT calls prevents repeated inference when the anomaly indicator is persistently high, bounding compute cost while maintaining responsiveness.
 
 ---
 
-## 10. Current Implementation Status and Limitations
+## 6. Storage Architecture
 
-### Implemented in v2.0
+**Files:** `app/azure/`, `app/storage/`
 
-- [x] Leakage-free drift computation (PreUpdateSnapshot)
-- [x] Bounded stability_score via exp(-variance_ratio)
-- [x] Bounded behavioural_consistency (cosine-based)
-- [x] Exp-Mahalanobis kernel (replaces d/(1+d))
-- [x] Bounded composite similarity (all components in [0,1])
-- [x] Prototype quarantine system (N_MIN=3, T_MIN=30s, consistency=0.72)
-- [x] Adaptive learning rate (eta_base=0.30, tau=50, eta_floor=0.01)
-- [x] Corrected EMA variance update (uses post-update mean)
-- [x] Quality-based prototype deletion (Q = log(n) * age_factor * sim)
-- [x] Dead-zone thresholds (update=0.75, create=0.50)
-- [x] 9-field rich PrototypeMetrics output
-- [x] TrustState per session (in memory_store.SessionState)
-- [x] Continuous EMA trust model (adaptive alpha, 3-zone decision)
-- [x] GAT augmentation (kappa=0.25)
-- [x] Event-driven Layer-3 escalation (3 trigger conditions)
-- [x] CosmosDB-compatible delete_prototype() method
+### Azure Cosmos DB
 
-### Planned Improvements (Not Yet Implemented)
+| Container | Partition Key | Content |
+|-----------|---------------|---------|
+| `computation-logs` | `/userId` | Per-event engine metrics, trust scores, GAT similarity |
+| `user-profiles` | `/userId` | 64-D GAT profile vectors |
+| `cbsa-behavioral` | `/username` | Behavioral event logs (JSONL) |
 
-- [ ] **Per-user adaptive sigma** for drift normalization: `sigma_u = mean(d_short_history) * 1.5`. Requires historical drift accumulation (minimum 30 events).
-- [ ] **Per-user adaptive thresholds**: `theta_update_u = mu_sim_u - 1.5*sigma_sim_u`. Requires per-user similarity history storage in memory_store.
-- [ ] **CosmosDB delete_prototype() method**: Currently only SQLiteStore has delete_prototype(). CosmosPrototypeStore needs equivalent.
-- [ ] **Session reset on RISK decision**: Application layer should consider re-authentication challenge when trust_score < theta_risk.
-- [ ] **Quarantine persistence**: Candidate pools are currently in-memory only. Server restart loses quarantine state. For production: persist to Redis or Cosmos.
-- [ ] **Trust state persistence across reconnects**: If a WebSocket disconnects and reconnects, trust resets to 0.5. Should resume from last known state for the same session.
+### Azure Blob Storage
+
+Container `cbsa-models`: trained GAT model checkpoint (`.pth` file). At startup, the GAT engine downloads the latest checkpoint from Blob Storage. Falls back to local `data/checkpoints/` (development) or random initialisation (no checkpoint available).
+
+### SQLite (Development / Local)
+
+Database: `cbsa.db`
+
+| Table | Purpose |
+|-------|---------|
+| `users` | Identity, initialization state, warmup event count |
+| `prototypes` | Per-user prototypes: vector, variance, support count, timestamps |
+| `behaviour_logs` | Full behavioral event history per user-session |
+
+### BehaviourRepository
+
+**File:** `app/storage/repository.py`
+
+All storage access within the pipeline goes through `BehaviourRepository`, a unified interface over both SQLite and Cosmos DB stores. This decouples pipeline logic from storage backend — the Cosmos DB containers can be replaced without modifying any pipeline code.
+
+### Session TTL and Event Limits
+
+In-memory session state is bounded:
+- `MAX_SESSION_EVENTS = 10,000`: maximum events before the session is evicted and restarted
+- `SESSION_TTL_SECONDS = 600`: sessions inactive for 10 minutes are evicted
 
 ---
 
-*Document maintained alongside implementation. Update when architectural decisions change.*
+## 7. Pipeline Execution Order and Invariants
+
+The four-layer pipeline executes in strict order per event. No layer may be skipped or reordered:
+
+```
+1. validate_and_extract(raw_event)              -> BehaviourEvent     (Layer 1)
+2. process_event(behaviour_event)               -> PreprocessedBehaviour  (Layer 2a)
+3. match_and_update_prototypes(preprocessed)    -> PrototypeMetrics   (Layer 2b)
+4. [if escalation condition]
+   gat_engine.infer(session_window)             -> gat_similarity     (Layer 3)
+5. evaluate(preprocessed, prototype_metrics,    -> TrustResult        (Layer 4)
+            gat_similarity, trust_state)
+```
+
+**Runtime invariants** (checked by `app/core/invariants.py`):
+
+| Invariant | Check |
+|-----------|-------|
+| Vector dimension | `len(vector) == 48` |
+| Vector range | All elements in `[0, 1]` |
+| Drift range | `d_short, d_long in [0, 1]` |
+| Stability | `stability in (0, 1]` |
+| Similarity | `similarity in [0, 1]` |
+| Trust score | `trust_score in [0, 1]` |
+| GAT score | `gat_score in [0, 1]` |
+
+Any invariant violation raises `InvariantError` and terminates processing for that event. The pipeline never propagates an invalid intermediate state to downstream layers.
+
+**Warmup protocol:** New users require `WARMUP_SKIP_EVENTS = 20` events before prototype matching begins. During warmup, Layer 4 returns a `WARMUP` status. The 20-event warmup gives Welford's algorithm sufficient observations for a meaningful variance estimate in 48-dimensional space.
+
+---
+
+## 8. Evaluation Methodology
+
+**File:** `tests/evaluation.py`
+
+The system is evaluated using standard biometric authentication metrics.
+
+### False Acceptance Rate (FAR)
+
+```
+FAR(tau) = |{attack events : trust > tau}| / |{total attack events}|
+```
+
+Fraction of impostor events that produced trust above threshold tau.
+
+### False Rejection Rate (FRR)
+
+```
+FRR(tau) = |{genuine events : trust <= tau}| / |{total genuine events}|
+```
+
+Fraction of genuine events that produced trust at or below threshold tau.
+
+### Equal Error Rate (EER)
+
+The threshold `tau*` at which `FAR(tau*) ≈ FRR(tau*)`. Computed by sweeping tau across 1,001 evenly spaced values in `[0, 1]` and finding the threshold minimizing `|FAR(tau) - FRR(tau)|`.
+
+EER is the standard single-number summary for biometric systems. Lower is better; a random classifier has EER = 50%.
+
+### Test Scenarios
+
+| Scenario | Description |
+|----------|-------------|
+| `standard` | Normal behavioral event stream for an enrolled user |
+| `attack` | Behavioral stream from a different user (impostor) |
+| `cold_start` | New user: verifies quarantine enrollment and trust growth |
+| `failure_cases` | Layer 1 rejection: wrong vector length, out-of-range values, duplicate nonce, non-monotonic timestamp |
+| `prototype_analytics` | Tabular per-user prototype statistics: support, age, quality scores |
+
+---
+
+## 9. System Constants Reference
+
+**File:** `app/core/constants.py`
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `VECTOR_DIM` | 48 | Behavioral vector dimensionality |
+| `WARMUP_SKIP_EVENTS` | 20 | Events before prototype matching begins |
+| `MAX_SESSION_EVENTS` | 10,000 | Session event capacity |
+| `SESSION_TTL_SECONDS` | 600 | Session inactivity expiry |
+| `ACCEPT_THRESHOLD` | 0.65 | Binary accept/reject threshold for evaluation |
+| `THETA_SAFE` | 0.80 | Trust zone: SAFE lower bound |
+| `THETA_RISK` | 0.40 | Trust zone: RISK upper bound |
+| `ALPHA_MAX` | 0.85 | EMA max coefficient (stable behavior) |
+| `ALPHA_MIN` | 0.30 | EMA min coefficient (anomalous behavior) |
+| `W_SIM` | 0.45 | Trust signal: similarity weight |
+| `W_STAB` | 0.25 | Trust signal: stability weight |
+| `W_DRIFT` | 0.30 | Trust signal: drift-complement weight |
+| `SHORT_DRIFT_WEIGHT` | 0.60 | Composite drift: short-term fraction |
+| `LONG_DRIFT_WEIGHT` | 0.40 | Composite drift: long-term fraction |
+| `ETA_BASE` | 0.30 | Adaptive learning rate: initial component |
+| `ETA_FLOOR` | 0.01 | Adaptive learning rate: minimum |
+| `TAU` | 50 | Adaptive learning rate: decay constant |
+| `THRESHOLD_UPDATE` | 0.75 | Similarity threshold to update prototype |
+| `THRESHOLD_CREATE` | 0.50 | Similarity threshold to route to quarantine |
+| `N_MIN_OBSERVATIONS` | 3 | Quarantine: minimum observations for promotion |
+| `T_MIN_SPAN_SECONDS` | 30.0 | Quarantine: minimum temporal spread |
+| `CONSISTENCY_THRESHOLD` | 0.72 | Quarantine: minimum cosine consistency |
+| `T_EXPIRE_SECONDS` | 600.0 | Quarantine: candidate expiry |
+| `MAX_PROTOTYPES` | 15 | Maximum prototypes per user |
+| `LAMBDA_AGE` | 1/86400 | Prototype quality: age decay rate (1 per day) |
+| `GAT_WINDOW_SECONDS` | 20 | GAT: temporal window for graph |
+| `GAT_EDGE_DISTINCT_TARGET` | 4 | GAT: distinct event-type limit per edge fan-out |
+| `GAT_NODE_FEATURE_DIM` | 56 | GAT: node feature dim (48 + 8 type embedding) |
+| `ANOMALY_ESCALATION_THRESHOLD` | 0.40 | GAT escalation: anomaly indicator threshold |
+| `N_UNCERTAIN_ESCALATION` | 3 | GAT escalation: consecutive uncertain events |
+| `T_RECHECK_SECONDS` | 30.0 | GAT escalation: recheck cooldown |

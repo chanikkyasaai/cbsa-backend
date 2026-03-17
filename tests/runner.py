@@ -43,7 +43,7 @@ class MockStore:
     """
 
     def __init__(self) -> None:
-        from app.engine.quarantine_manager import QuarantineManager
+        from app.prototype.quarantine_manager import QuarantineManager
         self._protos: dict = {}          # username -> list[Prototype]
         self._counter: dict = {}
         self._adaptive: dict = {}        # username -> {sim_mean, sim_m2, sim_count, ...}
@@ -145,8 +145,8 @@ def run_pipeline(username: str, vectors, store: MockStore, timestamps=None):
     from app.storage.memory_store import memory_store as _ms
     _ms.sessions.pop(f"test-{username}", None)
 
-    from app.engine.trust_engine import TrustEngine, TrustState
-    from app.engine.prototype_engine import compute_prototype_metrics
+    from app.trust.trust_engine import TrustEngine, TrustState
+    from app.prototype.prototype_engine import compute_prototype_metrics
     from app.models.behaviour_event import BehaviourEvent
 
     trust_engine = TrustEngine()
@@ -169,7 +169,7 @@ def run_pipeline(username: str, vectors, store: MockStore, timestamps=None):
         )
 
         # Layer-2: preprocessing
-        from app.engine.preprocessing import process_event
+        from app.preprocessing.preprocessing import process_event
         preprocessed = process_event(event)
 
         # Layer-2: prototype engine (pass event timestamp for quarantine timing)
@@ -447,7 +447,7 @@ def scenario_failure():
     print("SCENARIO 5: Failure / Invalid Inputs")
     print("=" * 70)
 
-    from app.engine.ingestion import validate_and_extract
+    from app.ingestion.ingestion import validate_and_extract
     from app.storage.memory_store import memory_store as _ms
 
     # Isolate session so nonce/timestamp state is fresh

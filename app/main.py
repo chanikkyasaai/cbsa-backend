@@ -13,29 +13,29 @@ from pydantic import ValidationError
 from typing import List, Dict, Any, Optional
 
 from app.config import settings, configure_logging
-from app.engine.ingestion import validate_and_extract
-from app.engine.preprocessing import process_event
-from app.engine.prototype_engine import compute_prototype_metrics
-from app.engine.trust_engine import trust_engine
-from app.engine.invariants import (
+from app.ingestion.ingestion import validate_and_extract
+from app.preprocessing.preprocessing import process_event
+from app.prototype.prototype_engine import compute_prototype_metrics
+from app.trust.trust_engine import trust_engine
+from app.core.invariants import (
     check_preprocessed_behaviour,
     check_prototype_metrics,
     check_trust_result,
     InvariantError,
 )
-from app.engine.structured_logger import structured_logger
+from app.logging.structured_logger import structured_logger
 from app.storage.sqlite_store import SQLiteStore, DB_PATH
 from app.storage.cosmos_prototype_store import cosmos_prototype_store
 from app.storage.memory_store import memory_store
 from app.models import BehaviourMessage, ServerResponse, LoginRequest, LoginResponse, TrainRequest
-from app.websocket_manager import ConnectionManager
-from app.layer3_manager import Layer3GATManager
-from app.enrollment_store import enrollment_store, ENROLLMENT_DURATION_SECONDS
-from app.behavioral_logger import behavioral_logger, BEHAVIORAL_LOG_DIR
-from app.triplet_trainer import triplet_trainer, CHECKPOINT_PATH
-from app.cosmos_logger import cosmos_logger
-from app.cosmos_profile_store import cosmos_profile_store
-from app.blob_model_store import blob_model_store
+from app.api.websocket_manager import ConnectionManager
+from app.layer3.layer3_manager import Layer3GATManager
+from app.azure.enrollment_store import enrollment_store, ENROLLMENT_DURATION_SECONDS
+from app.azure.behavioral_logger import behavioral_logger, BEHAVIORAL_LOG_DIR
+from app.gat.trainer import triplet_trainer, CHECKPOINT_PATH
+from app.azure.cosmos_logger import cosmos_logger
+from app.azure.cosmos_profile_store import cosmos_profile_store
+from app.azure.blob_model_store import blob_model_store
 
 configure_logging()
 logger = logging.getLogger(__name__)

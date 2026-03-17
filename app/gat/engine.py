@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 from app.config import settings
-from app.layer3_models import GATProcessingRequest, GATProcessingResponse
+from app.layer3.layer3_models import GATProcessingRequest, GATProcessingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class InternalGATEngine:
             # 1. Try downloading model from Azure Blob Storage
             model_path = None
             try:
-                from app.blob_model_store import blob_model_store
+                from app.azure.blob_model_store import blob_model_store
 
                 if blob_model_store.enabled:
                     import tempfile

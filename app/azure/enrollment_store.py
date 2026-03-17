@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 ENROLLMENT_DURATION_SECONDS = 5 * 60  # 5 minutes
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 ENROLLMENT_FILE = DATA_DIR / "enrollment_store.json"
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ class EnrollmentStore:
 
     def has_profile(self, user_id: str) -> bool:
         """Returns True if a trained profile exists for this user."""
-        from app.cosmos_profile_store import cosmos_profile_store
+        from app.azure.cosmos_profile_store import cosmos_profile_store
 
         return cosmos_profile_store.has_profile(user_id)
 

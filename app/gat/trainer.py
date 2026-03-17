@@ -16,7 +16,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 BEHAVIORAL_LOG_DIR = DATA_DIR / "behavioral_logs"
 PROFILES_DIR = DATA_DIR / "profiles"
 CHECKPOINT_PATH = DATA_DIR / "checkpoints" / "gat_checkpoint.pt"
@@ -101,7 +101,7 @@ def _normalize_event(raw: dict) -> dict:
 
 def _load_user_events(user_id: str) -> List[dict]:
     """Load user events from Cosmos DB (via behavioral_logger) or local JSONL fallback."""
-    from app.behavioral_logger import behavioral_logger
+    from app.azure.behavioral_logger import behavioral_logger
 
     logger.info("[load] Fetching events for user '%s' from Cosmos DB …", user_id)
     events = behavioral_logger.load_user_events(user_id)
@@ -211,7 +211,7 @@ class TripletTrainer:
         Returns a result dict with keys: user_id, status, message, profile_saved.
         """
         logger.info("[train_user] === Starting training for user '%s' (force=%s) ===", user_id, force)
-        from app.cosmos_profile_store import cosmos_profile_store
+        from app.azure.cosmos_profile_store import cosmos_profile_store
 
         if cosmos_profile_store.has_profile(user_id) and not force:
             logger.info("[train_user] Profile already exists for '%s', skipping", user_id)
@@ -286,7 +286,7 @@ class TripletTrainer:
         The two sources are merged so users present in either place are included.
         """
         logger.info("[train_all] === Starting train_all (force=%s) ===", force)
-        from app.behavioral_logger import behavioral_logger
+        from app.azure.behavioral_logger import behavioral_logger
 
         cosmos_users = behavioral_logger.list_users()
         local_users = [p.stem for p in BEHAVIORAL_LOG_DIR.glob("*.jsonl")]
@@ -520,7 +520,7 @@ class TripletTrainer:
         # Try blob storage first
         model_path = None
         try:
-            from app.blob_model_store import blob_model_store
+            from app.azure.blob_model_store import blob_model_store
             if blob_model_store.enabled:
                 import tempfile
                 tmp_path = str(Path(tempfile.gettempdir()) / "gat_trainer_checkpoint.pt")
@@ -551,7 +551,7 @@ class TripletTrainer:
         logger.info(f"GAT model checkpoint saved to {CHECKPOINT_PATH}")
 
         try:
-            from app.blob_model_store import blob_model_store
+            from app.azure.blob_model_store import blob_model_store
             if blob_model_store.enabled:
                 blob_model_store.upload_model(str(CHECKPOINT_PATH), _CHECKPOINT_BLOB_NAME)
         except Exception as e:
@@ -643,7 +643,7 @@ class TripletTrainer:
         sessions: int = 0,
         training_time: float = 0.0,
     ):
-        from app.cosmos_profile_store import cosmos_profile_store
+        from app.azure.cosmos_profile_store import cosmos_profile_store
 
         cosmos_profile_store.save_profile(
             user_id=user_id,
@@ -655,7 +655,7 @@ class TripletTrainer:
         logger.info(f"Profile saved for {user_id}")
 
     def load_profile(self, user_id: str) -> Optional[List[float]]:
-        from app.cosmos_profile_store import cosmos_profile_store
+        from app.azure.cosmos_profile_store import cosmos_profile_store
 
         return cosmos_profile_store.load_profile(user_id)
 

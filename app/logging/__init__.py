@@ -1,3 +1,3 @@
-"""app.logging — Centralized structured event logging."""
-from app.logging.structured_logger import structured_logger, StructuredLogger  # noqa: F401
-__all__ = ["structured_logger", "StructuredLogger"]
+from app.logging.structured_logger import StructuredLogger, structured_logger
+
+__all__ = ["StructuredLogger", "structured_logger"]

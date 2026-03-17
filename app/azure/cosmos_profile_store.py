@@ -40,7 +40,7 @@ except ImportError:
         "azure-cosmos package not installed – Cosmos DB profile store disabled"
     )
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 PROFILES_DIR = DATA_DIR / "profiles"
 
 

@@ -6,19 +6,19 @@ from typing import List, Dict, Optional, Tuple, Any
 import hashlib
 import numpy as np
 from app.models import BehaviourMessage
-from app.layer3_models import (
-    GATEventNode, GATTemporalEdge, GATGraph, 
+from app.layer3.layer3_models import (
+    GATEventNode, GATTemporalEdge, GATGraph,
     GATProcessingRequest, GATProcessingResponse
 )
 
 
 class GATDataProcessor:
     """Processes behavioral event streams into GAT-compatible temporal graphs"""
-    
+
     def __init__(self, window_seconds: int = 20, distinct_target: int = 4):
         """
         Initialize GAT data processor
-        
+
         Args:
             window_seconds: Sliding time window (seconds) for temporal graph
             distinct_target: Number of distinct event types to reach per node
@@ -26,14 +26,14 @@ class GATDataProcessor:
         self.window_seconds = window_seconds
         self.distinct_target = max(distinct_target, 1)
         self.feature_normalizer = self._create_normalizer()
-    
+
     def create_temporal_graph(self, event_window: List[BehaviourMessage]) -> GATGraph:
         """
         Convert sliding window of events into temporal graph
-        
+
         Args:
             event_window: List of behavioral events (assumed escalated from Layer 2)
-            
+
         Returns:
             GATGraph: Temporal graph ready for GAT processing
         """
@@ -74,7 +74,7 @@ class GATDataProcessor:
             event_diversity=unique_events,
             avg_time_between_events=avg_time_delta
         )
-    
+
     def _create_event_node(self, node_id: int, event: BehaviourMessage) -> GATEventNode:
         """Create a single event node from behavioral message"""
 
@@ -104,22 +104,22 @@ class GATDataProcessor:
         """Create deterministic 8D embedding for event type"""
         digest = hashlib.sha256(event_type.encode("utf-8")).digest()
         return [b / 255.0 for b in digest[:8]]
-    
+
     def _create_temporal_edges(self, events: List[BehaviourMessage], nodes: List[GATEventNode]) -> List[GATTemporalEdge]:
         """Create temporal edges that keep repeats and count distinct types"""
         edges = []
-        
+
         for i in range(len(events)):
             current_event = events[i]
             current_type = self._get_event_type(current_event)
             seen_types = {current_type}
-            
+
             for j in range(i + 1, len(events)):
                 next_event = events[j]
                 next_type = self._get_event_type(next_event)
                 time_delta = self._get_event_timestamp(next_event) - self._get_event_timestamp(current_event)
                 event_transition = f"{current_type}->{next_type}"
-                
+
                 edges.append(
                     GATTemporalEdge(
                         source_node_id=i,
@@ -133,9 +133,9 @@ class GATDataProcessor:
                     seen_types.add(next_type)
                     if len(seen_types) >= self.distinct_target:
                         break
-        
+
         return edges
-    
+
     def _create_normalizer(self):
         """Create feature normalizer for behavioral vectors"""
         # This would typically be trained on historical data
@@ -150,15 +150,15 @@ class GATDataProcessor:
 
     def _get_event_data(self, event: BehaviourMessage) -> Dict:
         return getattr(event, "event_data", {}) or {}
-    
+
     def prepare_gat_request(
-        self, 
-        graph: GATGraph, 
+        self,
+        graph: GATGraph,
         user_profile_vector: Optional[List[float]] = None,
         processing_mode: str = "inference"
     ) -> GATProcessingRequest:
         """Prepare request for cloud GAT service"""
-        
+
         return GATProcessingRequest(
             graph=graph,
             user_profile_vector=user_profile_vector,
@@ -171,7 +171,7 @@ class GATDataProcessor:
 
 class GATResultProcessor:
     """Processes GAT results — passes through raw similarity scores"""
-    
+
     def process_gat_response(self, response: GATProcessingResponse) -> Dict[str, Any]:
         """Return raw GAT scores without making auth decisions"""
         return {

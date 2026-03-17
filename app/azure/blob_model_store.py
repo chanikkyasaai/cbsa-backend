@@ -34,7 +34,7 @@ except ImportError:
         "Install it with: pip install azure-storage-blob"
     )
 
-_LOCAL_CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "data" / "checkpoints"
+_LOCAL_CHECKPOINT_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "checkpoints"
 
 
 class BlobModelStore:
