@@ -60,3 +60,10 @@ MAX_SESSION_EVENTS:  int   = 10_000   # cap on event_history per session
 ANOMALY_ESCALATION_THRESHOLD: float = 0.40
 N_UNCERTAIN_ESCALATION:       int   = 3
 T_RECHECK_SECONDS:            float = 30.0
+
+# Minimum number of events the Layer-3 session window must contain before GAT
+# inference is triggered.  GAT requires a temporal graph of at least this size
+# to produce a meaningful session embedding; invoking it on fewer events yields
+# unreliable similarity scores.  Centralised here so the threshold is auditable
+# and consistent across all callers.
+MIN_EVENTS_FOR_GAT_ESCALATION: int = 5

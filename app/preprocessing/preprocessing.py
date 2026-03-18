@@ -29,10 +29,12 @@ from __future__ import annotations
 import numpy as np
 
 from app.preprocessing.buffer_manager import update_session_buffer
+from app.preprocessing.transition_engine import compute_transition_surprise
 from app.preprocessing.drift_engine import (
     _DEFAULT_SIGMA,
     compute_behavioural_consistency,
     compute_long_drift,
+    compute_medium_drift,
     compute_short_drift,
     compute_stability_score,
 )
@@ -60,7 +62,7 @@ def process_event(event: BehaviourEvent) -> PreprocessedBehaviour:
         Layer-4 trust computation.
     """
     # ── STEP 1 + 2: Atomically capture snapshot and update buffer ──────────
-    # session_state: post-update (v_t included)
+    # session_state: post-update (v_t included in buffer)
     # snapshot:      pre-update (v_t NOT included in any statistics)
     session_state, snapshot = update_session_buffer(event)
 
@@ -75,6 +77,12 @@ def process_event(event: BehaviourEvent) -> PreprocessedBehaviour:
     short_drift = compute_short_drift(
         current_vector=current_vector,
         pre_short_window_mean=snapshot.short_window_mean,
+        sigma=sigma,
+    )
+
+    medium_drift = compute_medium_drift(
+        current_vector=current_vector,
+        pre_medium_window_mean=snapshot.medium_window_mean,
         sigma=sigma,
     )
 
@@ -100,12 +108,20 @@ def process_event(event: BehaviourEvent) -> PreprocessedBehaviour:
     post_window_vecs = np.vstack(list(session_state.short_window))
     window_vector = np.mean(post_window_vecs, axis=0)
 
+    # ── Layer-2c: Behavioral Session Fingerprint (transition surprise) ──────
+    # Computes surprise from the PRE-UPDATE Markov matrix (leakage-free),
+    # then updates the matrix with the current transition.  session_state
+    # carries both transition_probs and prev_event_type across events.
+    transition_surprise = compute_transition_surprise(session_state, event.event_type)
+
     return PreprocessedBehaviour(
         window_vector=window_vector,
         short_drift=short_drift,
+        medium_drift=medium_drift,
         long_drift=long_drift,
         stability_score=stability_score,
         variance_vector=session_state.running_variance.copy(),
         behavioural_consistency=behavioural_consistency,
         sigma_ref=sigma,
+        transition_surprise=transition_surprise,
     )

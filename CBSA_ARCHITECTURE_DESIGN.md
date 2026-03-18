@@ -7,7 +7,7 @@
 
 Continuous Behavioral Streaming Authentication (CBSA) is a real-time identity verification system that authenticates users by analyzing their behavioral patterns across a continuous stream of interaction events. Unlike challenge-based authentication (passwords, PINs, OTPs), CBSA operates passively in the background: every touch gesture, scroll event, typing pattern, and navigation interaction contributes to an ongoing authentication signal that adapts to the user over time without any deliberate user action.
 
-The system is structured as a four-layer processing pipeline. Layer 1 validates and extracts behavioral events from a mobile client over WebSocket. Layer 2 extracts leakage-free drift, stability, and prototype-matching signals using a geometric and statistical model of behavioral identity. Layer 3 runs a Graph Attention Network (GAT) over a temporal behavioral graph to produce a deep session embedding, escalated only when Layer 2 raises uncertainty. Layer 4 combines all signals into a continuous trust score through an Exponential Moving Average model with adaptive coefficient, producing zone-based authentication decisions.
+The system is structured as a four-layer processing pipeline. Layer 1 validates and extracts behavioral events from a mobile client over WebSocket. Layer 2 extracts leakage-free three-scale temporal drift (micro-behavioral, episodic, and identity-baseline), stability, prototype topology cohesion, prototype-matching signals, and a Behavioral Session Fingerprint (EMA-updated Markov transition surprise) using a geometric, statistical, and sequential model of behavioral identity. Layer 3 runs a Graph Attention Network (GAT) over a temporal behavioral graph to produce a deep session embedding, escalated only when Layer 2 raises uncertainty. Layer 4 combines all signals into a continuous trust score through an Exponential Moving Average model with cohesion-modulated adaptive coefficient, producing zone-based authentication decisions.
 
 This document describes every component of the system, the mathematical foundations of each design decision, the alternatives considered, and the explicit rationale for each choice.
 
@@ -25,6 +25,7 @@ This document describes every component of the system, the mathematical foundati
    - 3.5 Prototype Quarantine
    - 3.6 Adaptive Learning Rate
    - 3.7 Quality-Based Prototype Lifecycle
+   - 3.8 Behavioral Session Fingerprint Engine (Layer-2c)
 4. [Layer 3 — Graph Attention Network (GAT)](#4-layer-3--graph-attention-network-gat)
    - 4.1 Behavioral Graph Construction
    - 4.2 Node Feature Engineering
@@ -58,12 +59,14 @@ Mobile Client
                             |  BehaviourEvent
                             v
 +------------------------------------------------------------------+
-|  Layer 2: Preprocessing + Prototype Engine                       |
+|  Layer 2: Preprocessing + Prototype Engine + Fingerprint         |
 |  - Leakage-free drift & stability   - Composite similarity       |
 |  - Quarantine-gated prototype creation                           |
 |  - Adaptive learning rate           - Quality lifecycle          |
+|  - Behavioral Session Fingerprint (Markov transition surprise)   |
 +---------------------------+--------------------------------------+
                             |  PreprocessedBehaviour + PrototypeMetrics
+                            |  (incl. transition_surprise)
                             v
              +--------------+------------------+
              |  Escalate? (anomaly score)       |
@@ -171,7 +174,8 @@ Layer 2 is the statistical core of CBSA. It extracts three families of behaviora
 
 Each user session maintains an in-memory state structure:
 
-- **Short window** (`deque`, maxlen=5): the 5 most recent behavioral vectors
+- **Short window** (`deque`, maxlen=5): the 5 most recent behavioral vectors (micro-behavioral scale)
+- **Medium window** (`deque`, maxlen=20): the 20 most recent behavioral vectors (episodic scale)
 - **Running mean**: online estimate of the session long-term mean `mu_long`, updated via Welford's algorithm
 - **Running M2**: accumulated sum-of-squared deviations
 - **Running variance**: `sigma^2 = M2 / (n-1)` (unbiased estimator)
@@ -215,23 +219,48 @@ The `update_session_buffer()` function **atomically** captures the pre-update sn
 
 **File:** `app/preprocessing/drift_engine.py`
 
-Two drift signals are computed from the pre-update snapshot:
+Three drift signals are computed from the pre-update snapshot, forming a temporal hierarchy at three distinct behavioral scales:
 
-**Short drift** — deviation of `v_t` from the recent short window:
+**Short drift** — deviation of `v_t` from the 5-event micro-behavioral window:
 
 ```
-d_raw_short = ||v_t - mu_window^{t-1}||_2 / sqrt(D)
+d_raw_short = ||v_t - mu_short^{t-1}||_2 / sqrt(D)
 d_short = 1 - exp(-d_raw_short / sigma)
 ```
 
-**Long drift** — deviation of the short window from the long-term mean:
+Captures sudden within-session behavioral changes at the finest granularity. This is the primary anomaly signal: an impostor who cannot replicate the user's micro-behavioral patterns will immediately register high short drift.
+
+**Medium drift** — deviation of `v_t` from the 20-event episodic window:
 
 ```
-d_raw_long = ||mu_window^{t-1} - mu_long^{t-1}||_2 / sqrt(D)
+d_raw_medium = ||v_t - mu_medium^{t-1}||_2 / sqrt(D)
+d_medium = 1 - exp(-d_raw_medium / sigma)
+```
+
+Captures behavioral mode transitions at the episodic interaction scale. Slower than short drift (responds over 20 events rather than 5), faster than long drift (responds to within-session shifts, not just session-to-session changes). Detects transitions between interaction contexts — e.g., switching from browsing to form-filling — that short drift misses because they occur gradually.
+
+**Long drift** — deviation of the short window from the Welford running mean:
+
+```
+d_raw_long = ||mu_short^{t-1} - mu_long^{t-1}||_2 / sqrt(D)
 d_long = 1 - exp(-d_raw_long / sigma)
 ```
 
-Both outputs are in `[0, 1)`.
+Captures gradual behavioral drift across the full session identity baseline. A slow attacker who incrementally shifts behavioral vectors would evade short and medium drift detectors but register on the long-term baseline.
+
+All three outputs are in `[0, 1)`.
+
+#### Three-Scale Temporal Hierarchy
+
+The three signals operate at qualitatively different behavioral timescales:
+
+| Scale | Window | Timescale | Detects |
+|-------|--------|-----------|---------|
+| Short | 5 events | Micro-behavioral | Sudden impostor switches, replay attacks |
+| Medium | 20 events | Episodic | Mode transitions, context switches, gradual impersonation |
+| Long | Full session (Welford) | Identity baseline | Slow drift, session-level behavioral evolution |
+
+No single-scale system can detect all three threat profiles. A short-window-only system is blind to gradual episodic drift; a long-window-only system is slow to respond to sudden takeover. The three-scale hierarchy provides simultaneous sensitivity at all three behavioral timescales with zero additional computational cost (all windows are already maintained in session state).
 
 #### Design Decision: `sqrt(D)` Normalization
 
@@ -424,6 +453,79 @@ When the maximum prototype count (`MAX_PROTOTYPES = 15`) is reached, the prototy
 
 A freshly created prototype (n=1) with recent age and good relevance scores higher than an old high-support prototype that no longer matches current behavior. This keeps the prototype set tuned to the user's current behavioral state rather than their historical one.
 
+### 3.8 Behavioral Session Fingerprint Engine (Layer-2c)
+
+**File:** `app/preprocessing/transition_engine.py`
+
+Layer-2c captures the **sequential navigation structure** of user behavior — which event transitions the user characteristically makes and in which order — via an EMA-updated Markov transition probability matrix.
+
+#### Signal Definition
+
+```
+I(prev→curr)        = -log₂( P_EMA[prev][curr] )    (information content, bits)
+transition_surprise = 1 - exp( -I(prev→curr) / TRANS_SIGMA )
+```
+
+**Properties:**
+
+| Scenario | P | I | ts | Meaning |
+|----------|---|---|-----|---------|
+| Always-expected transition | ≈1.0 | ≈0 bits | ≈0.0 | No sequential anomaly |
+| Familiar transition | 0.5 | 1 bit | 0.28 | Seen roughly half the time |
+| Uncommon transition | 0.1 | 3.3 bits | 0.67 | Atypical but not impossible |
+| Never-seen transition | → 0 | floored | 0.92 | Completely novel navigation |
+
+**Constants:**
+
+| Constant | Value | Rationale |
+|----------|-------|-----------|
+| `TRANS_EMA_ALPHA` | 0.15 | Learning rate for matrix update. At α=0.15, a transition seen 10 times reaches ≈80% of long-run probability. |
+| `TRANS_SIGMA` | 3.0 | Normalization for bits→[0,1). At 3 bits, ts≈0.63 — "uncommon but not alarming". |
+| `MIN_TRANSITION_PROB` | 1e-4 | Floor to prevent log(0). Never-seen transition produces ts≈0.92. |
+
+#### EMA Update Rule
+
+For each source event type A, the matrix row `P[A]` is updated as follows when transition A→B is observed:
+
+```
+For all k in P[A]:  P[A][k] *= (1 - TRANS_EMA_ALPHA)   ← decay all entries
+P[A][B] += TRANS_EMA_ALPHA                               ← reinforce observed
+```
+
+This produces an unnormalized EMA accumulator. Probability of A→B is `P[A][B] / sum(P[A].values())`.
+
+The EMA decay ensures that transitions performed long ago gradually lose weight, allowing the model to adapt to evolving navigation habits.
+
+#### Leakage-Free Property
+
+Following the same discipline as drift metrics, the transition surprise is computed from the **pre-update** probability (before the current transition is incorporated):
+
+```
+Step 1: Read P[prev][curr]        ← pre-update (no leakage)
+Step 2: Compute surprise          ← using pre-update probability
+Step 3: Update P with A→B         ← post-scoring update
+Step 4: Advance prev_event_type   ← chain advance
+```
+
+If the matrix were updated before scoring, the current transition would inflate its own probability, systematically under-estimating the surprise of novel transitions.
+
+#### Why Sequential Structure is Orthogonal to Existing Signals
+
+The three existing Layer-2 signals measure:
+- **Drift**: how far the current feature vector is from prior means (amplitude/magnitude)
+- **Stability**: coherence of the current window (variance within a window)
+- **Similarity**: whether the current vector shape matches stored prototype shapes (geometry)
+
+None of these capture **ordering** — whether the user navigates pages in their habitual sequence. An attacker who has observed the genuine user's feature vectors (e.g., via shoulder-surfing) can reproduce the magnitude and shape but is likely to navigate in an unexpected order (e.g., accessing transfer screens before checking balance). The transition engine detects exactly this.
+
+#### Session State
+
+Per-session state in `SessionState`:
+- `transition_probs: Dict[str, Dict[str, float]]` — EMA Markov matrix
+- `prev_event_type: Optional[str]` — event type of the previous event
+
+For the first event in a session (no prior context), `transition_surprise = 0.0` — a neutral value that makes no sequential claim.
+
 ---
 
 ## 4. Layer 3 — Graph Attention Network (GAT)
@@ -560,16 +662,20 @@ Layer 4 aggregates the complete behavioral signal into a continuous trust score 
 ### 5.1 Raw Trust Signal
 
 ```
-R_t = w_sim * sim_t + w_stab * S_t + w_drift * (1 - D_t)
+R_t = w_sim * sim_t + w_stab * S_t + w_drift * (1 - D_t) + w_trans * (1 - ts_t)
 
-D_t = 0.60 * d_short_t + 0.40 * d_long_t    (composite drift)
+D_t  = 0.50 * d_short_t + 0.30 * d_medium_t + 0.20 * d_long_t   (three-scale composite drift)
+ts_t = transition_surprise_t                                       (Markov sequential fingerprint)
 
-Weights:  w_sim = 0.45,  w_stab = 0.25,  w_drift = 0.30
+Weights:  w_sim = 0.40,  w_stab = 0.20,  w_drift = 0.30,  w_trans = 0.10
+          (sum = 1.0)
 ```
 
 **Bounds verification:**
-- Maximum (sim=1, S=1, D=0): 0.45 + 0.25 + 0.30 = 1.0
-- Minimum (sim=0, S=0, D=1): 0 + 0 + 0 = 0.0
+- `D_t`: all three drift weights sum to 1.0; each drift term is in [0,1); therefore `D_t in [0, 1)`
+- `ts_t in [0, 1)` by construction (see Section 3.8)
+- Maximum (sim=1, S=1, D=0, ts=0): 0.40 + 0.20 + 0.30 + 0.10×1 = 1.0
+- Minimum (sim=0, S=0, D=1, ts=1): 0 + 0 + 0 + 0 = 0.0
 
 `R_t in [0, 1]` without clipping, by construction.
 
@@ -577,26 +683,51 @@ Weights:  w_sim = 0.45,  w_stab = 0.25,  w_drift = 0.30
 
 | Signal | Weight | Rationale |
 |--------|--------|-----------|
-| Similarity | 0.45 | Primary identity signal: how well does current behavior match the stored prototype? |
-| Drift-complement | 0.30 | Penalizes behavioral deviation. Short drift weighted 60%, long drift 40%: sudden changes are more alarming than gradual drift. |
-| Stability | 0.25 | Behavioral coherence quality. Lower weight: stability captures *how consistently* the user behaves, not *who* they are. |
+| Similarity | 0.40 | Primary identity signal: how well does current behavior match the stored prototype? |
+| Drift-complement | 0.30 | Penalizes behavioral deviation across all three temporal scales. |
+| Stability | 0.20 | Behavioral coherence quality. Lower weight: stability captures *how consistently* the user behaves, not *who* they are. |
+| Transition fingerprint | 0.10 | Sequential navigation structure. Captures whether the user follows their habitual app-navigation sequence at the event-ordering level — orthogonal to all magnitude/shape signals. |
+
+**Why `(1 - ts_t)` rather than `ts_t` directly?**
+The transition engine outputs *surprise* — high values indicate unexpected behavior. Using `(1 - ts_t)` inverts this to a *familiarity* contribution, matching the convention of all other terms in the formula: each term is a "trust evidence" value where high = trustworthy. A user making their characteristic navigation transitions receives the full `w_trans` contribution; an attacker making surprising transitions receives zero.
 
 **Why drift-complement `(1 - D_t)` rather than raw drift?**
 Using `(1 - D_t)` inverts the drift signal so all three terms contribute positively to trust: zero drift contributes +0.30; maximal drift contributes 0. This keeps the weight interpretation uniform — each term is a "trust evidence" component.
 
-**Why 60/40 short/long drift split?**
-Short drift captures sudden single-event deviations — the strongest signal of an impostor who cannot perfectly replicate the user's fine-grained micro-behavioral patterns. Long drift captures gradual session-level drift — a weaker but relevant signal of context change. Short-term deviations are weighted more heavily because they are the more alarming signal.
+**Three-scale composite drift rationale (50/30/20):**
+
+| Component | Weight | Rationale |
+|-----------|--------|-----------|
+| `d_short` (5-event) | 0.50 | Dominant weight: sudden micro-behavioral deviations are the strongest impostor signal. An attacker switching sessions immediately registers high short drift. |
+| `d_medium` (20-event) | 0.30 | Secondary: episodic-scale drift catches gradual impersonation and context switches missed by the 5-event window. |
+| `d_long` (Welford) | 0.20 | Tertiary: long-term drift is a valuable baseline signal but responds slowly by design; it should not dominate the instantaneous trust computation. |
+
+The three-scale decomposition is strictly more expressive than any two-scale system. A two-scale (short + long) system has a temporal blind spot in the 6–19 event range: behavioral shifts that manifest over 10–15 events are invisible to the 5-event window and too transient to register on the Welford baseline. The medium scale closes this gap.
 
 ### 5.2 Adaptive EMA Coefficient
 
 ```
-alpha_t = clip(alpha_max - gamma * d_short_t, alpha_min, alpha_max)
-gamma   = alpha_max - alpha_min = 0.55
+alpha_eff_max = ALPHA_MAX * (0.90 + 0.10 * cohesion_t)
 
-alpha_min = 0.30,  alpha_max = 0.85
+alpha_t = clip(alpha_eff_max - gamma * d_short_t, alpha_min, alpha_eff_max)
+gamma   = ALPHA_MAX - ALPHA_MIN = 0.55
+
+ALPHA_MIN = 0.30,  ALPHA_MAX = 0.85
 
 T_t = alpha_t * T_{t-1} + (1 - alpha_t) * R_t
 ```
+
+Where `cohesion_t` is the prototype topology cohesion score (see Section 3, Prototype Engine).
+
+**Effective alpha range by cohesion:**
+
+| cohesion | alpha_eff_max | Interpretation |
+|----------|--------------|----------------|
+| 1.0 (all prototypes aligned) | 0.85 | Full inertia — single behavioral mode, trust should be stable |
+| 0.5 (moderate spread) | 0.8075 | Slightly reduced inertia |
+| 0.0 (maximally spread) | 0.765 | Reduced inertia — multi-modal user, trust should respond more dynamically |
+
+**Effective alpha range by d_short (at cohesion=1.0):**
 
 | d_short | alpha | EMA half-life |
 |---------|-------|---------------|
@@ -604,13 +735,21 @@ T_t = alpha_t * T_{t-1} + (1 - alpha_t) * R_t
 | 0.5 (moderate) | 0.575 | ~1.3 events |
 | 1.0 (extreme) | 0.30 | ~0.57 events |
 
-**Design rationale:**
+**Design rationale — drift-modulated alpha:**
 Alpha encodes resistance to trust change — the EMA half-life. Making alpha a function of `d_short` implements a principled speed-accuracy trade-off:
-- Stable behavior (d_short ≈ 0): `alpha = 0.85`, strong temporal inertia. A single anomalous event does not immediately drop trust for a well-established session.
-- Sudden anomaly (d_short ≈ 1): `alpha = 0.30`, fast response. A sustained impostor who produces high short drift is rejected within 1-2 events rather than waiting for the EMA to propagate over many events.
+- Stable behavior (d_short ≈ 0): `alpha ≈ alpha_eff_max`, strong temporal inertia. A single anomalous event does not immediately drop trust for a well-established session.
+- Sudden anomaly (d_short ≈ 1): `alpha = 0.30`, fast response. A sustained impostor who produces high short drift is rejected within 1-2 events rather than waiting for the EMA to propagate.
+
+**Design rationale — cohesion-modulated alpha_eff_max:**
+The effective alpha ceiling is modulated by the prototype topology cohesion of the user's behavioral model. This encodes a structural insight: **how much inertia is appropriate depends on the geometric structure of the user's behavioral identity**.
+
+- A user with `cohesion = 1.0` has all stored prototypes pointing in the same direction in 48-D behavioral space. This is a **single-mode behavioral identity**: the user behaves consistently across all contexts. For such a user, trust should be highly stable — a single unusual event is probably noise. Full alpha_max inertia is appropriate.
+- A user with low cohesion has prototypes spread across behavioral space — they are a **multi-modal user** with genuinely different behavioral patterns depending on context (e.g., different typing styles at home vs. work). For such a user, trust must respond more dynamically to context changes, otherwise trust computed in one behavioral mode will incorrectly penalize legitimate behavior in another mode. Reducing `alpha_eff_max` slightly lowers temporal inertia, making the EMA more responsive.
+
+The 90/10 split (`0.90 + 0.10 * cohesion`) keeps the cohesion modulation subtle: the ceiling varies only between 0.765 and 0.85. This avoids making the EMA unstable for multi-modal users while still encoding the structural difference. A larger cohesion range would make the EMA overly sensitive; a smaller range would make the modulation meaningless.
 
 **Why linear dependency on d_short?**
-A linear coupling `alpha = alpha_max - gamma * d_short` is the simplest monotone function that spans the full `[alpha_min, alpha_max]` range. Nonlinear alternatives (e.g., sigmoid coupling) would introduce an additional shape parameter without clear benefit, and the linear function has a direct interpretation: each unit of short drift reduces alpha by exactly gamma.
+A linear coupling `alpha = alpha_eff_max - gamma * d_short` is the simplest monotone function spanning the full `[alpha_min, alpha_eff_max]` range. The linear function has a direct interpretation: each unit of short drift reduces alpha by exactly gamma.
 
 ### 5.3 Trust Zones and Decisions
 
@@ -689,13 +828,20 @@ In-memory session state is bounded:
 The four-layer pipeline executes in strict order per event. No layer may be skipped or reordered:
 
 ```
-1. validate_and_extract(raw_event)              -> BehaviourEvent     (Layer 1)
-2. process_event(behaviour_event)               -> PreprocessedBehaviour  (Layer 2a)
-3. match_and_update_prototypes(preprocessed)    -> PrototypeMetrics   (Layer 2b)
-4. [if escalation condition]
-   gat_engine.infer(session_window)             -> gat_similarity     (Layer 3)
-5. evaluate(preprocessed, prototype_metrics,    -> TrustResult        (Layer 4)
+1. validate_and_extract(raw_event)              -> BehaviourEvent       (Layer 1)
+2. process_event(behaviour_event)               -> PreprocessedBehaviour (Layer 2a + 2c)
+   └─ internally:
+      a. update_session_buffer(event)           -> snapshot + session_state
+      b. compute drift/stability (pre-snapshot)
+      c. compute_transition_surprise(session_state, event.event_type)
+         └─ uses pre-update Markov matrix, then updates it (leakage-free)
+3. match_and_update_prototypes(preprocessed)    -> PrototypeMetrics      (Layer 2b)
+   └─ passes through preprocessed.transition_surprise unchanged
+4. [if escalation condition AND len(window) >= MIN_EVENTS_FOR_GAT_ESCALATION]
+   gat_engine.infer(session_window)             -> gat_similarity        (Layer 3)
+5. evaluate(preprocessed, prototype_metrics,    -> TrustResult           (Layer 4)
             gat_similarity, trust_state)
+   └─ R_t includes w_trans * (1 - transition_surprise)
 ```
 
 **Runtime invariants** (checked by `app/core/invariants.py`):
@@ -704,9 +850,13 @@ The four-layer pipeline executes in strict order per event. No layer may be skip
 |-----------|-------|
 | Vector dimension | `len(vector) == 48` |
 | Vector range | All elements in `[0, 1]` |
-| Drift range | `d_short, d_long in [0, 1]` |
+| Drift range | `d_short, d_medium, d_long in [0, 1]` |
 | Stability | `stability in (0, 1]` |
 | Similarity | `similarity in [0, 1]` |
+| Transition surprise | `transition_surprise in [0, 1]` |
+| Prototype confidence | `prototype_confidence in [0, 1]` |
+| Prototype topology cohesion | `prototype_topology_cohesion in [0, 1]` |
+| Anomaly indicator | `anomaly_indicator in [0, 1]` |
 | Trust score | `trust_score in [0, 1]` |
 | GAT score | `gat_score in [0, 1]` |
 
@@ -771,11 +921,15 @@ EER is the standard single-number summary for biometric systems. Lower is better
 | `THETA_RISK` | 0.40 | Trust zone: RISK upper bound |
 | `ALPHA_MAX` | 0.85 | EMA max coefficient (stable behavior) |
 | `ALPHA_MIN` | 0.30 | EMA min coefficient (anomalous behavior) |
-| `W_SIM` | 0.45 | Trust signal: similarity weight |
-| `W_STAB` | 0.25 | Trust signal: stability weight |
+| `W_SIM` | 0.40 | Trust signal: similarity weight |
+| `W_STAB` | 0.20 | Trust signal: stability weight |
 | `W_DRIFT` | 0.30 | Trust signal: drift-complement weight |
-| `SHORT_DRIFT_WEIGHT` | 0.60 | Composite drift: short-term fraction |
-| `LONG_DRIFT_WEIGHT` | 0.40 | Composite drift: long-term fraction |
+| `W_TRANSITION` | 0.10 | Trust signal: Markov transition fingerprint weight |
+| `SHORT_DRIFT_WEIGHT` | 0.50 | Composite drift: short-term (5-event) fraction |
+| `MEDIUM_DRIFT_WEIGHT` | 0.30 | Composite drift: medium-term (20-event) fraction |
+| `LONG_DRIFT_WEIGHT` | 0.20 | Composite drift: long-term (Welford) fraction |
+| `COHESION_ALPHA_FLOOR` | 0.90 | Cohesion modulation: base fraction of ALPHA_MAX |
+| `COHESION_ALPHA_RANGE` | 0.10 | Cohesion modulation: cohesion contribution range |
 | `ETA_BASE` | 0.30 | Adaptive learning rate: initial component |
 | `ETA_FLOOR` | 0.01 | Adaptive learning rate: minimum |
 | `TAU` | 50 | Adaptive learning rate: decay constant |
@@ -793,3 +947,7 @@ EER is the standard single-number summary for biometric systems. Lower is better
 | `ANOMALY_ESCALATION_THRESHOLD` | 0.40 | GAT escalation: anomaly indicator threshold |
 | `N_UNCERTAIN_ESCALATION` | 3 | GAT escalation: consecutive uncertain events |
 | `T_RECHECK_SECONDS` | 30.0 | GAT escalation: recheck cooldown |
+| `MIN_EVENTS_FOR_GAT_ESCALATION` | 5 | GAT prerequisite: minimum session-window size |
+| `TRANS_EMA_ALPHA` | 0.15 | Transition engine: Markov matrix EMA learning rate |
+| `TRANS_SIGMA` | 3.0 | Transition engine: surprise normalization scale |
+| `MIN_TRANSITION_PROB` | 1e-4 | Transition engine: probability floor (prevents log₂(0)) |

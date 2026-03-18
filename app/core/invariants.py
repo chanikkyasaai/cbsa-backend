@@ -118,11 +118,13 @@ def check_preprocessed_behaviour(pb) -> None:
     """
     check_vector(pb.window_vector, "window_vector")
     check_scalar_01(pb.short_drift, "short_drift")
+    check_scalar_01(pb.medium_drift, "medium_drift")
     check_scalar_01(pb.long_drift, "long_drift")
     check_scalar_01(pb.stability_score, "stability_score")
     check_scalar_01(pb.behavioural_consistency, "behavioural_consistency")
     check_variance_vector(pb.variance_vector, "variance_vector")
     check_scalar_nonneg(pb.sigma_ref, "sigma_ref")
+    check_scalar_01(pb.transition_surprise, "transition_surprise")
 
 
 def check_prototype_metrics(pm) -> None:
@@ -133,12 +135,15 @@ def check_prototype_metrics(pm) -> None:
     """
     check_scalar_01(pm.similarity_score, "similarity_score")
     check_scalar_01(pm.short_drift, "short_drift")
+    check_scalar_01(pm.medium_drift, "medium_drift")
     check_scalar_01(pm.long_drift, "long_drift")
     check_scalar_01(pm.stability_score, "stability_score")
     check_scalar_01(pm.prototype_confidence, "prototype_confidence")
     check_scalar_01(pm.behavioural_consistency, "behavioural_consistency")
     check_scalar_01(pm.prototype_support_strength, "prototype_support_strength")
     check_scalar_01(pm.anomaly_indicator, "anomaly_indicator")
+    check_scalar_01(pm.prototype_topology_cohesion, "prototype_topology_cohesion")
+    check_scalar_01(pm.transition_surprise, "transition_surprise")
 
 
 def check_trust_result(tr) -> None:

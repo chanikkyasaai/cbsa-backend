@@ -53,10 +53,15 @@ class PrototypeMetrics:
         All three components are bounded in [0,1]; the weighted sum is too.
 
     short_drift : float  [0, 1)
-        Leakage-free, exp-normalized short-term drift. See PreprocessedBehaviour.
+        Leakage-free, exp-normalized short-term drift (5-event micro-behavioral scale).
+
+    medium_drift : float  [0, 1)
+        Leakage-free, exp-normalized medium-term drift (20-event episodic scale).
+        Captures behavioral mode transitions between the short micro-behavioral
+        scale and the long identity baseline.
 
     long_drift : float  [0, 1)
-        Leakage-free, exp-normalized long-term drift. See PreprocessedBehaviour.
+        Leakage-free, exp-normalized long-term drift (full session running mean).
 
     stability_score : float  (0, 1]
         Variance-ratio stability. Bounded by exp construction. See PreprocessedBehaviour.
@@ -91,9 +96,30 @@ class PrototypeMetrics:
         are captured. The drift multiplier amplifies the score when behavior
         is both dissimilar AND rapidly changing — characteristic of session
         hijacking rather than legitimate use.
+
+    prototype_topology_cohesion : float  [0, 1]
+        Mean pairwise cosine similarity between all of the user's stored prototypes.
+            cohesion = (2 / (K*(K-1))) * sum_{i<j} cos(mu_i, mu_j)
+        Measures the geometric tightness of the user's behavioral model:
+          cohesion = 1.0 : all prototypes point in the same behavioral direction
+                           (single consistent behavioral mode)
+          cohesion < 0.5 : prototypes are spread across behavioral space
+                           (multi-modal user: different contexts produce different modes)
+        A single prototype always returns cohesion = 1.0.
+        Used by Layer-4 to modulate EMA inertia: tight behavioral models deserve
+        higher temporal smoothing; spread models should respond more dynamically.
+
+    transition_surprise : float  [0, 1)
+        Behavioral Session Fingerprint score passed through from Layer-2c.
+        Measures the unexpectedness of the current event transition relative to
+        the user's established Markov navigation model.  High surprise indicates
+        an atypical navigation sequence; low surprise indicates habitual flow.
+        Passed through from PreprocessedBehaviour unchanged; included here so
+        Layer-4 receives the full behavioral state vector in one object.
     """
     similarity_score: float
     short_drift: float
+    medium_drift: float
     long_drift: float
     stability_score: float
     matched_prototype_id: Optional[int]
@@ -101,3 +127,5 @@ class PrototypeMetrics:
     behavioural_consistency: float
     prototype_support_strength: float
     anomaly_indicator: float
+    prototype_topology_cohesion: float
+    transition_surprise: float

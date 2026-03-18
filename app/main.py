@@ -16,7 +16,7 @@ from app.config import settings, configure_logging
 from app.ingestion.ingestion import validate_and_extract
 from app.preprocessing.preprocessing import process_event
 from app.prototype.prototype_engine import compute_prototype_metrics
-from app.trust.trust_engine import trust_engine
+from app.trust.trust_engine import trust_engine, MIN_EVENTS_FOR_GAT_ESCALATION
 from app.core.invariants import (
     check_preprocessed_behaviour,
     check_prototype_metrics,
@@ -461,8 +461,11 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                             similarity_score=metrics.similarity_score,
                             stability_score=metrics.stability_score,
                             short_drift=metrics.short_drift,
+                            medium_drift=metrics.medium_drift,
                             long_drift=metrics.long_drift,
                             anomaly_indicator=metrics.anomaly_indicator,
+                            prototype_topology_cohesion=metrics.prototype_topology_cohesion,
+                            transition_surprise=metrics.transition_surprise,
                             gat_similarity=gat_similarity,
                             current_time=_t_now,
                         )
@@ -493,7 +496,9 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                             and user_is_enrolled
                         ):
                             session_window = gat_manager.get_session_window(session_id)
-                            if len(session_window) >= 5:
+                            # Prerequisite: GAT requires a minimum temporal graph size.
+                            # MIN_EVENTS_FOR_GAT_ESCALATION is the L4 constant governing this.
+                            if len(session_window) >= MIN_EVENTS_FOR_GAT_ESCALATION:
                                 logger.info(
                                     "Layer-4 escalation triggered for session %s "
                                     "(decision=%s, anomaly=%.3f)",
@@ -530,8 +535,11 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                                         similarity_score=metrics.similarity_score,
                                         stability_score=metrics.stability_score,
                                         short_drift=metrics.short_drift,
+                                        medium_drift=metrics.medium_drift,
                                         long_drift=metrics.long_drift,
                                         anomaly_indicator=metrics.anomaly_indicator,
+                                        prototype_topology_cohesion=metrics.prototype_topology_cohesion,
+                                        transition_surprise=metrics.transition_surprise,
                                         gat_similarity=gat_similarity,
                                         current_time=time.time(),
                                     )

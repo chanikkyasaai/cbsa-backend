@@ -210,6 +210,24 @@ def _enforce_prototype_limit_quality(
 
     If len(prototypes) > limit, delete the prototype with the lowest Q(k).
     Only one prototype is deleted per call (caller invokes after each insertion).
+
+    ── Architectural Boundary Note (Leak-2 fix) ─────────────────────────────
+    This is a deliberate Layer-2 PROTOTYPE LIFECYCLE responsibility, NOT a
+    trust or authentication decision.  Layer-4 (TrustEngine) is intentionally
+    not notified when a prototype is removed: the deletion is a model-hygiene
+    operation (evicting old/irrelevant prototypes to bound storage) that does
+    not change the authentication outcome for the current event.
+
+    Rationale for keeping this decision in Layer-2:
+      - Prototype lifecycle (insert, update, evict) is fully self-contained;
+        propagating deletion events to Layer-4 would couple the layers without
+        any benefit.
+      - The quality score Q(k) is defined solely over prototype-internal fields
+        (support_count, age, similarity) — no trust-layer information needed.
+      - The only visible effect for Layer-4 is that the next get_prototypes()
+        call may return a smaller set; the similarity to the surviving best-match
+        is unaffected by which prototype was evicted.
+    ─────────────────────────────────────────────────────────────────────────
     """
     if len(prototypes) <= limit:
         return
@@ -226,6 +244,45 @@ def _enforce_prototype_limit_quality(
         store.delete_prototype(to_delete.prototype_id, username)
     except TypeError:
         store.delete_prototype(to_delete.prototype_id)
+
+
+# ── Prototype Topology Cohesion ──────────────────────────────────────────────
+
+def _compute_prototype_cohesion(prototypes: list) -> float:
+    """
+    Mean pairwise cosine similarity between all stored prototype vectors.
+
+        cohesion = (2 / (K*(K-1))) * sum_{i < j} cos(mu_i, mu_j)
+
+    Measures the geometric tightness of the user's behavioral model:
+      cohesion -> 1.0 : prototypes cluster in the same behavioral direction
+                        (single consistent mode — high-confidence behavioral model)
+      cohesion -> 0.0 : prototypes scattered across behavioral space
+                        (multi-modal user — distinct behavioral contexts)
+
+    K=0 or K=1: returns 1.0 (trivially cohesive, no pairwise comparison possible).
+    Used by Layer-4 to modulate EMA inertia: tight models deserve stronger temporal
+    smoothing; spread models should respond more dynamically to behavioral signals.
+
+    Returns: float in [0, 1]
+    """
+    if len(prototypes) <= 1:
+        return 1.0
+
+    vectors = [np.asarray(p.vector, dtype=np.float64) for p in prototypes]
+    norms = [float(np.linalg.norm(v)) for v in vectors]
+
+    sims = []
+    for i in range(len(vectors)):
+        for j in range(i + 1, len(vectors)):
+            ni, nj = norms[i], norms[j]
+            if ni < 1e-10 or nj < 1e-10:
+                sims.append(0.0)
+            else:
+                sim = float(np.dot(vectors[i], vectors[j]) / (ni * nj))
+                sims.append(max(0.0, min(1.0, sim)))
+
+    return float(np.mean(sims)) if sims else 1.0
 
 
 # ── Main Entry Point ─────────────────────────────────────────────────────────
@@ -337,6 +394,7 @@ def compute_prototype_metrics(
         return PrototypeMetrics(
             similarity_score=0.0,
             short_drift=preprocessed.short_drift,
+            medium_drift=preprocessed.medium_drift,
             long_drift=preprocessed.long_drift,
             stability_score=preprocessed.stability_score,
             matched_prototype_id=prototype_id,
@@ -344,6 +402,8 @@ def compute_prototype_metrics(
             behavioural_consistency=preprocessed.behavioural_consistency,
             prototype_support_strength=0.0,
             anomaly_indicator=compute_anomaly_indicator(0.0, preprocessed.short_drift),
+            prototype_topology_cohesion=1.0,   # No prototypes yet: trivially cohesive
+            transition_surprise=preprocessed.transition_surprise,
         )
 
     # ── FIND BEST MATCHING PROTOTYPE ─────────────────────────────────────────
@@ -380,6 +440,22 @@ def compute_prototype_metrics(
     matched_id: Optional[int] = best_prototype.prototype_id if best_prototype else None
 
     # ── PROTOTYPE UPDATE / QUARANTINE ROUTING ────────────────────────────────
+    # Architectural Boundary Note (Leak-1 fix):
+    # This threshold-based routing (update / quarantine / skip) is a deliberate
+    # Layer-2 BEHAVIORAL LIFECYCLE responsibility, NOT a trust decision.
+    # Layer-4 (TrustEngine) is intentionally unaware of which routing branch was
+    # taken; it only receives the measured similarity_score in PrototypeMetrics.
+    #
+    # Rationale:
+    #   - The update/quarantine decision is purely about prototype model maintenance
+    #     (when to incorporate new behavioral observations into stored prototypes).
+    #   - Layer-4 should not be burdened with prototype-management state; its sole
+    #     input is the similarity signal, which already encodes the quality of the
+    #     current behavioral match.
+    #   - Exposing the routing branch to Layer-4 would create tight coupling between
+    #     the learning algorithm and the trust scoring algorithm — changes to one
+    #     would break the other.
+    # ─────────────────────────────────────────────────────────────────────────
     if best_prototype is not None and best_similarity >= threshold_update:
         # High similarity: the current behavior matches an established prototype.
         # Update the prototype to incorporate this new observation.
@@ -447,9 +523,15 @@ def compute_prototype_metrics(
     prototype_support_strength = compute_prototype_support_strength(support_count)
     anomaly = compute_anomaly_indicator(best_similarity, preprocessed.short_drift)
 
+    # Prototype topology cohesion: geometric tightness of the user's behavioral model.
+    # Reload prototypes to include any newly promoted prototype in the cohesion estimate.
+    all_current_protos = store.get_prototypes(username)
+    cohesion = _compute_prototype_cohesion(all_current_protos)
+
     return PrototypeMetrics(
         similarity_score=best_similarity,
         short_drift=preprocessed.short_drift,
+        medium_drift=preprocessed.medium_drift,
         long_drift=preprocessed.long_drift,
         stability_score=preprocessed.stability_score,
         matched_prototype_id=matched_id,
@@ -457,4 +539,6 @@ def compute_prototype_metrics(
         behavioural_consistency=preprocessed.behavioural_consistency,
         prototype_support_strength=prototype_support_strength,
         anomaly_indicator=anomaly,
+        prototype_topology_cohesion=cohesion,
+        transition_surprise=preprocessed.transition_surprise,
     )

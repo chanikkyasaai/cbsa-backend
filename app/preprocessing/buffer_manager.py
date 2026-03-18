@@ -50,8 +50,9 @@ class PreUpdateSnapshot:
     pre-update values, ensuring v_t is never part of its own reference distribution.
 
     Attributes:
-        short_window_mean    : Mean of last W events (not including current v_t)
-        short_window_vectors : Stacked array of last W vectors (not including v_t)
+        short_window_mean    : Mean of last 5 events (not including current v_t)
+        short_window_vectors : Stacked array of last 5 vectors (not including v_t)
+        medium_window_mean   : Mean of last 20 events (not including current v_t)
         long_term_mean       : Running mean before this event (Welford's μ_{n-1})
         long_term_variance   : Running variance before this event (Welford's σ²_{n-1})
         sample_count         : Number of events seen before this event
@@ -59,6 +60,7 @@ class PreUpdateSnapshot:
     """
     short_window_mean: np.ndarray
     short_window_vectors: np.ndarray
+    medium_window_mean: np.ndarray
     long_term_mean: np.ndarray
     long_term_variance: np.ndarray
     sample_count: int
@@ -95,12 +97,19 @@ def update_session_buffer(event: BehaviourEvent) -> tuple[SessionState, PreUpdat
         pre_short_mean = vector.copy()
         has_window = False
 
+    # Medium window pre-update mean (20-event episodic scale)
+    if len(session_state.medium_window) > 0:
+        pre_medium_mean = np.mean(np.vstack(list(session_state.medium_window)), axis=0)
+    else:
+        pre_medium_mean = pre_short_mean.copy()   # Cold start: fall back to short mean
+
     pre_long_mean = session_state.running_mean.copy()
     pre_long_variance = session_state.running_variance.copy()
 
     snapshot = PreUpdateSnapshot(
         short_window_mean=pre_short_mean,
         short_window_vectors=short_window_vecs,
+        medium_window_mean=pre_medium_mean,
         long_term_mean=pre_long_mean,
         long_term_variance=pre_long_variance,
         sample_count=pre_count,
@@ -111,6 +120,7 @@ def update_session_buffer(event: BehaviourEvent) -> tuple[SessionState, PreUpdat
     # STEP 2: Update session state with v_t (POST-update)
     # ──────────────────────────────────────────────────────────────────────
     session_state.short_window.append(vector)
+    session_state.medium_window.append(vector)
     session_state.event_history.append(vector)
     if len(session_state.event_history) > MAX_HISTORY:
         session_state.event_history.pop(0)

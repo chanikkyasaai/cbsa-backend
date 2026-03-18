@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 
@@ -41,6 +41,7 @@ class TrustState:
 @dataclass(slots=True)
 class SessionState:
     short_window: deque = field(default_factory=lambda: deque(maxlen=5))
+    medium_window: deque = field(default_factory=lambda: deque(maxlen=20))
     running_mean: np.ndarray = field(default_factory=lambda: np.zeros(VECTOR_SIZE, dtype=np.float64))
     running_variance: np.ndarray = field(default_factory=lambda: np.zeros(VECTOR_SIZE, dtype=np.float64))
     m2: np.ndarray = field(default_factory=lambda: np.zeros(VECTOR_SIZE, dtype=np.float64))
@@ -51,6 +52,14 @@ class SessionState:
     fast_delta_count: int = 0
     trust_state: TrustState = field(default_factory=TrustState)
     last_activity: float = field(default_factory=time.time)   # Unix timestamp of last event
+
+    # ── Behavioral Session Fingerprint (Layer-2c) ─────────────────────────
+    # EMA-updated Markov transition probability matrix.
+    # transition_probs[prev_type][curr_type] = EMA-probability of this transition.
+    # Used by transition_engine.py to compute per-event transition_surprise.
+    transition_probs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # The event_type of the previous event — None until the first event is processed.
+    prev_event_type: Optional[str] = None
 
 
 class MemoryStore:

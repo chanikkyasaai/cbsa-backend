@@ -106,6 +106,33 @@ def compute_short_drift(
     return exp_normalize(raw, sigma)
 
 
+def compute_medium_drift(
+    current_vector: np.ndarray,
+    pre_medium_window_mean: np.ndarray,
+    sigma: float = _DEFAULT_SIGMA,
+) -> float:
+    """
+    Medium-term drift: deviation of current event from the 20-event episodic window.
+
+        d_medium(t) = 1 - exp(-||v_t - mu_medium^{t-1}||_2 / (sqrt(D) * sigma))
+
+    The medium window (maxlen=20) captures behavioral context at the episodic scale —
+    longer than micro-behavioral fluctuations (short, 5 events) but shorter than
+    the full-session identity baseline (long-term running mean).
+
+    Three-scale temporal hierarchy:
+      d_short  (5-event window)  : micro-behavioral — single-event anomalies
+      d_medium (20-event window) : episodic          — interaction-mode transitions
+      d_long   (running Welford) : identity baseline — long-term behavioral drift
+
+    Uses PRE-UPDATE medium window mean — no leakage.
+
+    Returns: float in [0, 1)
+    """
+    raw = normalized_l2(current_vector, pre_medium_window_mean)
+    return exp_normalize(raw, sigma)
+
+
 def compute_long_drift(
     pre_short_window_mean: np.ndarray,
     pre_long_term_mean: np.ndarray,

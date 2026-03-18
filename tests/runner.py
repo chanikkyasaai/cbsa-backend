@@ -181,8 +181,11 @@ def run_pipeline(username: str, vectors, store: MockStore, timestamps=None):
             similarity_score=metrics.similarity_score,
             stability_score=metrics.stability_score,
             short_drift=metrics.short_drift,
+            medium_drift=metrics.medium_drift,
             long_drift=metrics.long_drift,
             anomaly_indicator=metrics.anomaly_indicator,
+            prototype_topology_cohesion=metrics.prototype_topology_cohesion,
+            transition_surprise=metrics.transition_surprise,
             current_time=t,
         )
 
@@ -190,12 +193,14 @@ def run_pipeline(username: str, vectors, store: MockStore, timestamps=None):
             "event": i + 1,
             "similarity": metrics.similarity_score,
             "short_drift": metrics.short_drift,
+            "medium_drift": metrics.medium_drift,
             "stability": metrics.stability_score,
             "anomaly": metrics.anomaly_indicator,
             "trust": trust_result.trust_score,
             "decision": trust_result.decision,
             "proto_id": metrics.matched_prototype_id,
             "n_protos": len(store.get_prototypes(username)),
+            "transition_surprise": metrics.transition_surprise,
         })
 
     return results
@@ -345,7 +350,7 @@ def scenario_attack(n_events: int = 50):
 
 def _print_table(results: list) -> None:
     header = (
-        f"{'Evt':>4} | {'Sim':>5} | {'Drift':>5} | {'Stab':>5} | "
+        f"{'Evt':>4} | {'Sim':>5} | {'S-Dft':>5} | {'M-Dft':>5} | {'Stab':>5} | "
         f"{'Anom':>5} | {'Trust':>5} | {'Decision':<10} | {'Protos':>6}"
     )
     print(header)
@@ -353,8 +358,8 @@ def _print_table(results: list) -> None:
     for r in results:
         print(
             f"{r['event']:>4} | {r['similarity']:>5.3f} | {r['short_drift']:>5.3f} | "
-            f"{r['stability']:>5.3f} | {r['anomaly']:>5.3f} | {r['trust']:>5.3f} | "
-            f"{r['decision']:<10} | {r['n_protos']:>6}"
+            f"{r['medium_drift']:>5.3f} | {r['stability']:>5.3f} | {r['anomaly']:>5.3f} | "
+            f"{r['trust']:>5.3f} | {r['decision']:<10} | {r['n_protos']:>6}"
         )
 
 

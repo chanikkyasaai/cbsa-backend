@@ -23,15 +23,21 @@ class PreprocessedBehaviour:
         post-update statistics — it represents the current behavioral state.
 
     short_drift : float  [0, 1)
-        Short-term drift: deviation of current vector from pre-update local
-        window mean.
-            d_short(t) = 1 - exp(-||v_t - mu_window^{t-1}||_2 / (sqrt(D)*sigma))
-        Captures sudden within-session behavioral changes. Leakage-free.
+        Short-term drift: deviation of current vector from pre-update 5-event window mean.
+            d_short(t) = 1 - exp(-||v_t - mu_short^{t-1}||_2 / (sqrt(D)*sigma))
+        Captures sudden within-session behavioral changes (micro-behavioral scale).
+        Leakage-free.
+
+    medium_drift : float  [0, 1)
+        Medium-term drift: deviation of current vector from pre-update 20-event window mean.
+            d_medium(t) = 1 - exp(-||v_t - mu_medium^{t-1}||_2 / (sqrt(D)*sigma))
+        Captures behavioral mode transitions at the episodic interaction scale —
+        slower than short drift, faster than long drift. Leakage-free.
 
     long_drift : float  [0, 1)
         Long-term drift: deviation of local window mean from global session mean.
-            d_long(t) = 1 - exp(-||mu_window^{t-1} - mu_global^{t-1}||_2 / (sqrt(D)*sigma))
-        Captures gradual behavioral drift across the session. Leakage-free.
+            d_long(t) = 1 - exp(-||mu_short^{t-1} - mu_global^{t-1}||_2 / (sqrt(D)*sigma))
+        Captures gradual behavioral drift across the full session. Leakage-free.
 
     stability_score : float  (0, 1]
         Exponential variance-ratio stability measure:
@@ -54,11 +60,31 @@ class PreprocessedBehaviour:
     sigma_ref : float
         The drift scale parameter sigma used for exp-normalization.
         Logged for diagnostics. Candidate for per-user adaptation in production.
+
+    transition_surprise : float  [0, 1)
+        Behavioral Session Fingerprint score from Layer-2c (transition_engine).
+        Captures the sequential structure of the user's navigation pattern via
+        an EMA-updated Markov transition probability matrix.
+
+            I(prev→curr) = -log₂( P_EMA[prev][curr] )       (information content)
+            transition_surprise = 1 - exp( -I(prev→curr) / TRANS_SIGMA )
+
+        High surprise (→ 1.0): current event transition was unexpected given the
+        user's established navigation habits — characteristic of an attacker who
+        does not know the user's typical app-navigation flow.
+
+        Low surprise (→ 0.0): transition was exactly as expected — strong signal
+        that this is the genuine user following their habitual navigation sequence.
+
+        Returns 0.0 for the first event in a session (no prior context yet).
+        Leakage-free: P is read BEFORE incorporating the current transition.
     """
     window_vector: np.ndarray
     short_drift: float
+    medium_drift: float
     long_drift: float
     stability_score: float
     variance_vector: np.ndarray
     behavioural_consistency: float
     sigma_ref: float
+    transition_surprise: float

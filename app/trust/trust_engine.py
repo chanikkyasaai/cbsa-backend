@@ -27,24 +27,51 @@ Where:
 Raw Trust Signal
 ----------------
     R_t = w_sim * sim_t + w_stab * stab_t + w_drift * (1 - D_t)
+          + w_trans * (1 - ts_t)
 
-    D_t = 0.60 * d_short_t + 0.40 * d_long_t  (composite drift)
+    D_t  = 0.50 * d_short_t + 0.30 * d_medium_t + 0.20 * d_long_t
+           (three-scale composite drift)
+    ts_t = transition_surprise_t  (Markov sequential fingerprint)
 
-    Weights: w_sim=0.45, w_stab=0.25, w_drift=0.30
+    Weights: w_sim=0.40, w_stab=0.20, w_drift=0.30, w_trans=0.10
+             (sum = 1.0)
 
 Boundary verification:
-  Maximum R_t (sim=1, stab=1, D_t=0): 0.45 + 0.25 + 0.30*1 = 1.0
-  Minimum R_t (sim=0, stab=0, D_t=1): 0 + 0 + 0.30*0 = 0.0
-  R_t is therefore naturally bounded in [0, 1] without clipping.
+  Maximum R_t (sim=1, stab=1, D_t=0, ts=0): 0.40+0.20+0.30+0.10*1 = 1.0
+  Minimum R_t (sim=0, stab=0, D_t=1, ts=1): 0 + 0 + 0 + 0.10*0   = 0.0
+  R_t is naturally bounded in [0, 1] without clipping.
 
 Why these weights?
-  - Similarity (0.45): Primary authentication signal — how well does current
+  - Similarity (0.40): Primary authentication signal — how well does current
     behavior match the established prototype? Highest weight.
-  - Drift-complement (0.30): Penalizes behavioral deviation. Combined drift
-    uses 60/40 weighting (short > long) because sudden short-term changes
-    are more alarming than gradual long-term drift.
-  - Stability (0.25): Behavioral consistency quality. Lower weight because
+  - Drift-complement (0.30): Penalizes behavioral deviation. Three-scale
+    composite: short (0.50) > medium (0.30) > long (0.20). Short drift
+    detects single-event anomalies; medium drift detects interaction-mode
+    transitions; long drift detects identity-baseline evolution.
+  - Stability (0.20): Behavioral consistency quality. Lower weight because
     stability measures intra-window coherence, not inter-prototype agreement.
+  - Transition fingerprint (0.10): Sequential navigation structure. Captures
+    whether the user follows their habitual app-navigation patterns at the
+    event-sequence level — orthogonal to all magnitude/shape signals above.
+    An attacker who mirrors feature vectors but uses atypical navigation
+    sequences is penalized here while the other signals remain unaffected.
+
+Prototype Topology Cohesion — EMA Alpha Modulation
+----------------------------------------------------
+The adaptive EMA coefficient alpha_max is further modulated by prototype
+topology cohesion (the mean pairwise cosine similarity between all prototypes):
+
+    alpha_eff_max = alpha_max * (COHESION_ALPHA_FLOOR + COHESION_ALPHA_RANGE * cohesion)
+
+    COHESION_ALPHA_FLOOR = 0.90,  COHESION_ALPHA_RANGE = 0.10
+
+  cohesion = 1.0 (tight model): alpha_eff_max = alpha_max * 1.0 = 0.85 (full inertia)
+  cohesion = 0.0 (spread model): alpha_eff_max = alpha_max * 0.90 = 0.765 (slightly responsive)
+
+Rationale: a user with a tight, consistent behavioral model (high cohesion) has a
+well-defined identity baseline — the trust score should be stable (high inertia).
+A user with a spread prototype set (multiple behavioral modes) has a more ambiguous
+baseline — the trust score should adapt slightly more dynamically to behavioral signals.
 
 Adaptive EMA Coefficient
 ------------------------
@@ -140,16 +167,26 @@ ALPHA_MAX: float = 0.85      # EMA coefficient at zero drift (slow, smooth)
 ALPHA_MIN: float = 0.30      # EMA coefficient at maximum drift (fast, responsive)
 _ALPHA_GAMMA: float = ALPHA_MAX - ALPHA_MIN   # Modulation range
 
-# ── Raw signal weights (must satisfy: w_sim + w_stab + w_drift = 1.0) ───────
+# ── Raw signal weights (must satisfy: w_sim + w_stab + w_drift + w_trans = 1.0) ──
 
-W_SIMILARITY: float = 0.45
-W_STABILITY: float = 0.25
+W_SIMILARITY: float = 0.40
+W_STABILITY: float = 0.20
 W_DRIFT: float = 0.30
+W_TRANSITION: float = 0.10   # Behavioral Session Fingerprint (Markov transition surprise)
 
-# ── Composite drift weights (must sum to 1.0) ─────────────────────────────────
+# ── Three-scale composite drift weights (must sum to 1.0) ──────────────────────
 
-W_SHORT_DRIFT: float = 0.60
-W_LONG_DRIFT: float = 0.40
+W_SHORT_DRIFT: float = 0.50    # Micro-behavioral: single-event anomaly detection
+W_MEDIUM_DRIFT: float = 0.30   # Episodic: interaction-mode transition detection
+W_LONG_DRIFT: float = 0.20     # Identity baseline: long-term behavioral drift
+
+# ── Cohesion-modulated alpha parameters ───────────────────────────────────────
+
+# alpha_effective_max = ALPHA_MAX * (COHESION_ALPHA_FLOOR + COHESION_ALPHA_RANGE * cohesion)
+# cohesion=1.0 -> multiplier=1.00 -> alpha_eff_max = 0.850 (full inertia)
+# cohesion=0.0 -> multiplier=0.90 -> alpha_eff_max = 0.765 (slightly more responsive)
+COHESION_ALPHA_FLOOR: float = 0.90
+COHESION_ALPHA_RANGE: float = 0.10
 
 # ── GAT augmentation ─────────────────────────────────────────────────────────
 
@@ -177,6 +214,12 @@ THETA_RISK_DEFAULT: float = 0.40    # Trust < this: RISK
 ANOMALY_ESCALATION_THRESHOLD: float = 0.40   # anomaly_indicator threshold for escalation
 N_UNCERTAIN_ESCALATION: int = 3              # consecutive UNCERTAIN events before escalation
 T_RECHECK_SECONDS: float = 30.0             # Minimum seconds between GAT invocations
+
+# Minimum Layer-3 session-window size required before GAT can be invoked.
+# Callers (e.g. main.py) enforce this prerequisite before calling GAT.
+# Defined here so the threshold is co-located with all other escalation logic
+# and readable from tests without importing app.core.constants.
+MIN_EVENTS_FOR_GAT_ESCALATION: int = 5
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -253,37 +296,69 @@ class TrustEngine:
         similarity_score: float,
         stability_score: float,
         short_drift: float,
+        medium_drift: float,
         long_drift: float,
+        transition_surprise: float = 0.0,
     ) -> float:
         """
         Compute raw trust signal R_t from Layer-2 metrics.
 
-            D_t = 0.60 * d_short + 0.40 * d_long
-            R_t = 0.45 * sim + 0.25 * stab + 0.30 * (1 - D_t)
+            D_t  = 0.50 * d_short + 0.30 * d_medium + 0.20 * d_long
+            R_t  = 0.40 * sim + 0.20 * stab + 0.30 * (1 - D_t) + 0.10 * (1 - ts)
 
-        All inputs expected in [0, 1]. Output is naturally in [0, 1]
-        (verify: max = 0.45+0.25+0.30*1 = 1.0, min = 0+0+0.30*0 = 0).
+        Three-scale composite drift captures micro-behavioral anomalies (short),
+        episodic mode transitions (medium), and identity baseline drift (long).
+        Transition surprise (ts) captures sequential navigation structure via an
+        EMA-updated Markov model.  All inputs expected in [0, 1].
+        Output is naturally bounded in [0, 1] (convex combination of [0,1] values).
+
+        Parameters
+        ----------
+        transition_surprise : float in [0, 1), default 0.0
+            When no prior event exists (session start), pass 0.0 — this gives
+            the full trust contribution from the fingerprint term, which is
+            correct: we cannot assess sequential surprise without prior context.
 
         Returns: float in [0, 1]
         """
-        composite_drift = W_SHORT_DRIFT * short_drift + W_LONG_DRIFT * long_drift
+        composite_drift = (
+            W_SHORT_DRIFT * short_drift
+            + W_MEDIUM_DRIFT * medium_drift
+            + W_LONG_DRIFT * long_drift
+        )
         raw = (
             W_SIMILARITY * similarity_score
             + W_STABILITY * stability_score
             + W_DRIFT * (1.0 - composite_drift)
+            + W_TRANSITION * (1.0 - transition_surprise)
         )
         return max(0.0, min(1.0, float(raw)))
 
-    def compute_adaptive_alpha(self, short_drift: float) -> float:
+    def compute_adaptive_alpha(
+        self,
+        short_drift: float,
+        prototype_topology_cohesion: float = 1.0,
+    ) -> float:
         """
         Compute the adaptive EMA coefficient for this event.
 
-            alpha_t = clip(alpha_max - gamma * d_short, alpha_min, alpha_max)
+            alpha_eff_max = ALPHA_MAX * (COHESION_ALPHA_FLOOR + COHESION_ALPHA_RANGE * cohesion)
+            alpha_t = clip(alpha_eff_max - gamma * d_short, alpha_min, alpha_eff_max)
 
-        Returns: float in [alpha_min, alpha_max] = [0.30, 0.85]
+        Cohesion modulation:
+          cohesion=1.0 (tight behavioral model) -> alpha_eff_max = 0.85 (full inertia)
+          cohesion=0.0 (spread behavioral model) -> alpha_eff_max = 0.765 (more dynamic)
+
+        Short-drift modulation:
+          d_short=0 (stable)  -> alpha = alpha_eff_max (slow EMA, resistant to noise)
+          d_short=1 (extreme) -> alpha = ALPHA_MIN=0.30 (fast EMA, rapid response)
+
+        Returns: float in [ALPHA_MIN, alpha_eff_max]
         """
-        alpha = ALPHA_MAX - _ALPHA_GAMMA * float(short_drift)
-        return max(ALPHA_MIN, min(ALPHA_MAX, alpha))
+        cohesion = max(0.0, min(1.0, float(prototype_topology_cohesion)))
+        alpha_eff_max = ALPHA_MAX * (COHESION_ALPHA_FLOOR + COHESION_ALPHA_RANGE * cohesion)
+        alpha = alpha_eff_max - _ALPHA_GAMMA * float(short_drift)
+        return max(ALPHA_MIN, min(alpha_eff_max, alpha))
 
     def update_trust(
         self,
@@ -291,8 +366,11 @@ class TrustEngine:
         similarity_score: float,
         stability_score: float,
         short_drift: float,
+        medium_drift: float,
         long_drift: float,
         anomaly_indicator: float,
+        prototype_topology_cohesion: float = 1.0,
+        transition_surprise: float = 0.0,
         gat_similarity: Optional[float] = None,
         current_time: Optional[float] = None,
     ) -> TrustResult:
@@ -301,14 +379,17 @@ class TrustEngine:
 
         Args
         ----
-        state            : Mutable per-session trust state (modified in-place)
-        similarity_score : Layer-2 composite similarity [0,1]
-        stability_score  : Layer-2 stability score [0,1]
-        short_drift      : Layer-2 short-term drift [0,1)
-        long_drift       : Layer-2 long-term drift [0,1)
-        anomaly_indicator: Layer-2 anomaly indicator [0,1]
-        gat_similarity   : Optional Layer-3 GAT similarity [0,1]
-        current_time     : Unix timestamp (defaults to time.time())
+        state                      : Mutable per-session trust state (modified in-place)
+        similarity_score           : Layer-2 composite similarity [0,1]
+        stability_score            : Layer-2 stability score [0,1]
+        short_drift                : Layer-2 short-term drift (5-event) [0,1)
+        medium_drift               : Layer-2 medium-term drift (20-event) [0,1)
+        long_drift                 : Layer-2 long-term drift (running) [0,1)
+        anomaly_indicator          : Layer-2 anomaly indicator [0,1]
+        prototype_topology_cohesion: Geometric tightness of user's prototype set [0,1]
+        transition_surprise        : Layer-2c Markov sequential fingerprint [0,1)
+        gat_similarity             : Optional Layer-3 GAT similarity [0,1]
+        current_time               : Unix timestamp (defaults to time.time())
 
         Returns
         -------
@@ -317,9 +398,10 @@ class TrustEngine:
         t = current_time if current_time is not None else time.time()
         state.event_count += 1
 
-        # ── 1. Compute raw signal from Layer-2 metrics ────────────────────
+        # ── 1. Compute raw signal from Layer-2/2c metrics ─────────────────
         raw_signal = self.compute_raw_signal(
-            similarity_score, stability_score, short_drift, long_drift
+            similarity_score, stability_score, short_drift, medium_drift, long_drift,
+            transition_surprise,
         )
 
         # ── 2. Optional GAT augmentation (Layer-3 integration) ────────────
@@ -334,8 +416,8 @@ class TrustEngine:
             raw_signal = max(0.0, min(1.0, raw_signal))
             gat_augmented = True
 
-        # ── 3. Adaptive EMA coefficient ───────────────────────────────────
-        alpha_t = self.compute_adaptive_alpha(short_drift)
+        # ── 3. Adaptive EMA coefficient (drift-modulated + cohesion-modulated) ──
+        alpha_t = self.compute_adaptive_alpha(short_drift, prototype_topology_cohesion)
 
         # ── 4. EMA trust update ───────────────────────────────────────────
         # T_t = alpha_t * T_{t-1} + (1 - alpha_t) * R_t
