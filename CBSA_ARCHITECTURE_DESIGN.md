@@ -255,7 +255,7 @@ All three outputs are in `[0, 1)`.
 The three signals operate at qualitatively different behavioral timescales:
 
 | Scale | Window | Timescale | Detects |
-|-------|--------|-----------|---------|
+| :--- | :------ | :---------- | :--------- |
 | Short | 5 events | Micro-behavioral | Sudden impostor switches, replay attacks |
 | Medium | 20 events | Episodic | Mode transitions, context switches, gradual impersonation |
 | Long | Full session (Welford) | Identity baseline | Slow drift, session-level behavioral evolution |
@@ -271,7 +271,7 @@ For a D-dimensional vector in `[0,1]^D`, the maximum possible L2 distance betwee
 Three candidate normalizations were evaluated:
 
 | Approach | Formula | Analysis |
-|----------|---------|---------|
+| :---------- | :---------- | :---------- |
 | Linear clipping | `min(d / d_max, 1)` | Requires choosing `d_max` without principled basis; clips outliers instead of smoothly mapping them |
 | Platt / logistic | `d / (1 + d)` | No natural scale parameter; insensitive at high d (approaches 1 slowly) |
 | Exponential | `1 - exp(-d / sigma)` | Natural scale parameter sigma; smooth; derivative strictly decreasing |
@@ -302,7 +302,7 @@ Where:
 Two alternatives were considered:
 
 | Approach | Problem |
-|----------|---------|
+| :---------- | :---------- |
 | Mean consecutive L2 | Unbounded: the mean L2 between consecutive events can exceed 1.0, breaking the [0,1] guarantee of the composite similarity score |
 | Linear variance ratio | Unbounded when short variance exceeds global variance |
 
@@ -350,7 +350,7 @@ The dominant weight on cosine (0.50) reflects that behavioral identity is primar
 #### Design Decision: Exp-Mahalanobis over d/(1+d)
 
 | Property | `exp(-d/sqrt(D))` | `d/(1+d)` |
-|----------|-----------------|----------|
+| :---------- | :---------- | :---------- |
 | Probabilistic interpretation | Unnormalized Gaussian kernel (likelihood ratio under Gaussian prototype model) | Logistic/sigmoid |
 | Dimensionality normalization | Explicit sqrt(D) | None |
 | Discriminability at large d | Faster decay | Slow saturation |
@@ -372,7 +372,7 @@ Full covariance estimation for D=48 requires at minimum O(D^2) = 2,304 samples f
 When composite similarity falls below `THRESHOLD_CREATE = 0.50`, the behavioral vector enters a **CandidatePool** rather than immediately creating a new prototype. A CandidatePrototype is promoted to a full Prototype only when all three conditions are simultaneously satisfied:
 
 | Condition | Parameter | Value | Rationale |
-|-----------|-----------|-------|-----------|
+| :---------- | :---------- | :------ | :---------- |
 | Observation count | `N_MIN` | 3 | A single deviating event cannot create a prototype |
 | Temporal spread | `T_MIN` | 30s | Burst events within a short window cannot satisfy count alone |
 | Consistency | `CONSISTENCY_THRESHOLD` | 0.72 | Mean cosine to centroid >= 0.72, requiring directional agreement (angle <= 44 degrees in 48-D space) |
@@ -414,7 +414,7 @@ sigma^2_final = 0.7 * sigma^2_EMA + 0.3 * sigma^2_session
 Parameters: `eta_base = 0.30`, `tau = 50`, `eta_floor = 0.01`
 
 | n | eta |
-|---|-----|
+| :--- | :------ |
 | 0 | 0.31 |
 | 10 | 0.133 |
 | 50 | 0.121 |
@@ -446,7 +446,7 @@ When the maximum prototype count (`MAX_PROTOTYPES = 15`) is reached, the prototy
 **Component rationale:**
 
 | Component | Formula | Effect |
-|-----------|---------|--------|
+| :---------- | :---------- | :---------- |
 | Support | `log(1+n)` | Logarithmic returns: establishes that 100 obs is valuable but not 10x more than 10 |
 | Recency | `exp(-lambda*age)` | A prototype unmatched for 1 day has Q reduced by exp(-1) ≈ 0.37; 7 days: exp(-7) ≈ 0.001 |
 | Relevance | `max(sim, 0.1)` | Prototype not matching current behavior scores lower (min 0.1 prevents zero) |
@@ -469,7 +469,7 @@ transition_surprise = 1 - exp( -I(prev→curr) / TRANS_SIGMA )
 **Properties:**
 
 | Scenario | P | I | ts | Meaning |
-|----------|---|---|-----|---------|
+| :---------- | :--- | :--- | :---- | :---------- |
 | Always-expected transition | ≈1.0 | ≈0 bits | ≈0.0 | No sequential anomaly |
 | Familiar transition | 0.5 | 1 bit | 0.28 | Seen roughly half the time |
 | Uncommon transition | 0.1 | 3.3 bits | 0.67 | Atypical but not impossible |
@@ -478,7 +478,7 @@ transition_surprise = 1 - exp( -I(prev→curr) / TRANS_SIGMA )
 **Constants:**
 
 | Constant | Value | Rationale |
-|----------|-------|-----------|
+| :---------- | :------- | :---------- |
 | `TRANS_EMA_ALPHA` | 0.15 | Learning rate for matrix update. At α=0.15, a transition seen 10 times reaches ≈80% of long-run probability. |
 | `TRANS_SIGMA` | 3.0 | Normalization for bits→[0,1). At 3 bits, ts≈0.63 — "uncommon but not alarming". |
 | `MIN_TRANSITION_PROB` | 1e-4 | Floor to prevent log(0). Never-seen transition produces ts≈0.92. |
@@ -547,7 +547,7 @@ The 20-second window captures a meaningful unit of user interaction — sufficie
 Each node (event) is represented as a **56-dimensional feature vector**:
 
 | Dimensions | Source | Description |
-|------------|--------|-------------|
+| :---------- | :------- | :---------- |
 | 0-47 | `event_data.vector` | 48-D behavioral vector from mobile SDK |
 | 48-55 | Hash embedding | 8-byte event-type encoding: `sha256(event_type)[:8]` |
 
@@ -682,7 +682,7 @@ Weights:  w_sim = 0.40,  w_stab = 0.20,  w_drift = 0.30,  w_trans = 0.10
 **Weight rationale:**
 
 | Signal | Weight | Rationale |
-|--------|--------|-----------|
+| :---------- | :------- | :---------- |
 | Similarity | 0.40 | Primary identity signal: how well does current behavior match the stored prototype? |
 | Drift-complement | 0.30 | Penalizes behavioral deviation across all three temporal scales. |
 | Stability | 0.20 | Behavioral coherence quality. Lower weight: stability captures *how consistently* the user behaves, not *who* they are. |
@@ -697,7 +697,7 @@ Using `(1 - D_t)` inverts the drift signal so all three terms contribute positiv
 **Three-scale composite drift rationale (50/30/20):**
 
 | Component | Weight | Rationale |
-|-----------|--------|-----------|
+| :---------- | :------- | :---------- |
 | `d_short` (5-event) | 0.50 | Dominant weight: sudden micro-behavioral deviations are the strongest impostor signal. An attacker switching sessions immediately registers high short drift. |
 | `d_medium` (20-event) | 0.30 | Secondary: episodic-scale drift catches gradual impersonation and context switches missed by the 5-event window. |
 | `d_long` (Welford) | 0.20 | Tertiary: long-term drift is a valuable baseline signal but responds slowly by design; it should not dominate the instantaneous trust computation. |
@@ -754,7 +754,7 @@ A linear coupling `alpha = alpha_eff_max - gamma * d_short` is the simplest mono
 ### 5.3 Trust Zones and Decisions
 
 | Zone | Trust Range | Decision | Meaning |
-|------|-------------|----------|---------|
+| :------ | :---------- | :------- | :---------- |
 | SAFE | `[theta_safe, 1.0]` | ACCEPT | Strong behavioral match |
 | MONITOR | `[theta_risk, theta_safe)` | LOG | Mild deviation, passive monitoring |
 | RISK | `[0, theta_risk)` | REJECT | Sustained behavioral anomaly |
@@ -790,7 +790,7 @@ AND (time_since_last_gat > T_RECHECK_SECONDS)           # = 30s
 ### Azure Cosmos DB
 
 | Container | Partition Key | Content |
-|-----------|---------------|---------|
+| :---------- | :---------- | :---------- |
 | `computation-logs` | `/userId` | Per-event engine metrics, trust scores, GAT similarity |
 | `user-profiles` | `/userId` | 64-D GAT profile vectors |
 | `cbsa-behavioral` | `/username` | Behavioral event logs (JSONL) |
@@ -847,7 +847,7 @@ The four-layer pipeline executes in strict order per event. No layer may be skip
 **Runtime invariants** (checked by `app/core/invariants.py`):
 
 | Invariant | Check |
-|-----------|-------|
+| :---------- | :---------- |
 | Vector dimension | `len(vector) == 48` |
 | Vector range | All elements in `[0, 1]` |
 | Drift range | `d_short, d_medium, d_long in [0, 1]` |
@@ -897,7 +897,7 @@ EER is the standard single-number summary for biometric systems. Lower is better
 ### Test Scenarios
 
 | Scenario | Description |
-|----------|-------------|
+| :---------- | :---------- |
 | `standard` | Normal behavioral event stream for an enrolled user |
 | `attack` | Behavioral stream from a different user (impostor) |
 | `cold_start` | New user: verifies quarantine enrollment and trust growth |
@@ -911,7 +911,7 @@ EER is the standard single-number summary for biometric systems. Lower is better
 **File:** `app/core/constants.py`
 
 | Constant | Value | Description |
-|----------|-------|-------------|
+| :---------- | :------- | :---------- |
 | `VECTOR_DIM` | 48 | Behavioral vector dimensionality |
 | `WARMUP_SKIP_EVENTS` | 20 | Events before prototype matching begins |
 | `MAX_SESSION_EVENTS` | 10,000 | Session event capacity |
