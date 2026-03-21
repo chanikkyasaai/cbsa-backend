@@ -82,6 +82,11 @@ THRESHOLD_CREATE: float = 0.50   # Maximum similarity before routing to quaranti
 # Adaptive threshold requires at least this many similarity observations per user
 MIN_ADAPTIVE_OBSERVATIONS: int = 30
 
+# Provisional std used when no accumulated similarity history exists yet but the
+# prototype is mature. Acts as a conservative prior: t_update = mu - 1.5*0.04.
+# Replaced by real std once MIN_ADAPTIVE_OBSERVATIONS are accumulated.
+PROVISIONAL_STD: float = 0.04
+
 # Quality score age decay
 LAMBDA_AGE: float = 1.0 / (3600 * 24)   # Decay constant: 1/day (prototype ages over ~days)
 
@@ -287,41 +292,80 @@ def _compute_prototype_cohesion(prototypes: list) -> float:
 
 # ── Main Entry Point ─────────────────────────────────────────────────────────
 
-def _get_adaptive_thresholds(store, username: str) -> tuple[float, float]:
+def _get_adaptive_thresholds(
+    store,
+    username: str,
+    best_similarity: float = 0.0,
+    prototype_support: int = 0,
+) -> tuple[float, float]:
     """
     Load per-user adaptive thresholds from the store.
 
     Returns (threshold_update, threshold_create).
 
-    If the store supports get_user_adaptive_fields() and the user has
-    >= MIN_ADAPTIVE_OBSERVATIONS similarity observations, compute:
-        theta_update = mu_sim - 1.5 * sigma_sim
-        theta_create = mu_sim - 3.0 * sigma_sim
+    Priority order:
+    1. Real adaptive thresholds — when the user has >= MIN_ADAPTIVE_OBSERVATIONS
+       accumulated similarity observations in the store:
+           t_update = clip(mu_sim - 1.5 * sigma_sim, 0.50, 0.95)
+           t_create = clip(mu_sim - 3.0 * sigma_sim, 0.10, t_update - 0.10)
 
-    Otherwise fall back to the global defaults.
+    2. Provisional thresholds — when the user has NO accumulated history yet
+       (e.g. first run after fix, or cold store) BUT has a mature prototype
+       (prototype_support >= MIN_ADAPTIVE_OBSERVATIONS). Uses the current
+       best_similarity as a proxy for mu and PROVISIONAL_STD as a conservative
+       prior for sigma:
+           t_update = clip(best_similarity - 1.5 * PROVISIONAL_STD, 0.50, 0.95)
+           t_create = clip(best_similarity - 3.0 * PROVISIONAL_STD, 0.10, t_update - 0.10)
+       This activates personalised thresholds immediately without needing to
+       delete historical data or wait for MIN_ADAPTIVE_OBSERVATIONS new events.
+
+    3. Global fallback — when neither condition is met (new user, no mature
+       prototype, or store unavailable): THRESHOLD_UPDATE=0.75, THRESHOLD_CREATE=0.50.
     """
     if not hasattr(store, "get_user_adaptive_fields"):
+        if prototype_support >= MIN_ADAPTIVE_OBSERVATIONS and best_similarity > 0.0:
+            return _provisional_thresholds(best_similarity)
         return THRESHOLD_UPDATE, THRESHOLD_CREATE
 
     try:
         fields = store.get_user_adaptive_fields(username)
         if fields is None:
+            if prototype_support >= MIN_ADAPTIVE_OBSERVATIONS and best_similarity > 0.0:
+                return _provisional_thresholds(best_similarity)
             return THRESHOLD_UPDATE, THRESHOLD_CREATE
 
-        n_sim = int(fields.get("sim_count", 0))
+        # Field names must match what get_user_adaptive_fields() actually returns:
+        #   "similarity_count", "similarity_mean", "similarity_std"
+        n_sim = int(fields.get("similarity_count", 0))
         if n_sim < MIN_ADAPTIVE_OBSERVATIONS:
+            # Not enough real history — fall to provisional if prototype is mature
+            if prototype_support >= MIN_ADAPTIVE_OBSERVATIONS and best_similarity > 0.0:
+                return _provisional_thresholds(best_similarity)
             return THRESHOLD_UPDATE, THRESHOLD_CREATE
 
-        mu_sim = float(fields.get("sim_mean", THRESHOLD_UPDATE))
-        # Welford variance → std
-        sim_m2 = float(fields.get("sim_m2", 0.0))
-        sigma_sim = float(np.sqrt(sim_m2 / n_sim)) if n_sim > 0 else 0.0
+        mu_sim = float(fields.get("similarity_mean", THRESHOLD_UPDATE))
+        # get_user_adaptive_fields returns pre-computed std, not m2
+        sigma_sim = float(fields.get("similarity_std", 0.0))
 
         t_update = float(np.clip(mu_sim - 1.5 * sigma_sim, 0.50, 0.95))
         t_create = float(np.clip(mu_sim - 3.0 * sigma_sim, 0.10, t_update - 0.10))
         return t_update, t_create
     except Exception:
         return THRESHOLD_UPDATE, THRESHOLD_CREATE
+
+
+def _provisional_thresholds(best_similarity: float) -> tuple[float, float]:
+    """
+    Compute provisional thresholds from the current similarity observation when
+    no accumulated history is available but the prototype is mature.
+
+    Uses PROVISIONAL_STD = 0.04 as a conservative prior for sigma.
+    These thresholds are replaced by real adaptive thresholds once
+    MIN_ADAPTIVE_OBSERVATIONS accumulate in the store.
+    """
+    t_update = float(np.clip(best_similarity - 1.5 * PROVISIONAL_STD, 0.50, 0.95))
+    t_create = float(np.clip(best_similarity - 3.0 * PROVISIONAL_STD, 0.10, t_update - 0.10))
+    return t_update, t_create
 
 
 def compute_prototype_metrics(
@@ -360,9 +404,6 @@ def compute_prototype_metrics(
     """
     current_time = current_time if current_time is not None else time.time()
     prototypes = store.get_prototypes(username)
-
-    # Load per-user adaptive thresholds (falls back to globals if insufficient data)
-    threshold_update, threshold_create = _get_adaptive_thresholds(store, username)
 
     # ── COLD START: No prototypes yet ────────────────────────────────────────
     if not prototypes:
@@ -439,6 +480,18 @@ def compute_prototype_metrics(
     best_similarity = max(0.0, float(best_similarity))
     matched_id: Optional[int] = best_prototype.prototype_id if best_prototype else None
 
+    # Load per-user adaptive thresholds now that best_similarity is known.
+    # Passing best_similarity + prototype support allows provisional thresholds
+    # to activate immediately for users whose historical writes failed (e.g.
+    # due to the kwarg bug), without needing to delete data or wait for
+    # MIN_ADAPTIVE_OBSERVATIONS new events.
+    threshold_update, threshold_create = _get_adaptive_thresholds(
+        store,
+        username,
+        best_similarity=best_similarity,
+        prototype_support=best_prototype.support_count if best_prototype else 0,
+    )
+
     # ── PROTOTYPE UPDATE / QUARANTINE ROUTING ────────────────────────────────
     # Architectural Boundary Note (Leak-1 fix):
     # This threshold-based routing (update / quarantine / skip) is a deliberate
@@ -510,11 +563,14 @@ def compute_prototype_metrics(
         try:
             store.update_user_adaptive_fields(
                 username=username,
-                similarity=best_similarity,
-                drift=preprocessed.short_drift,
+                new_similarity=best_similarity,
+                new_short_drift=preprocessed.short_drift,
             )
-        except Exception:
-            pass  # Adaptive field update is best-effort; never crash the pipeline
+        except Exception as _afe:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "update_user_adaptive_fields failed for %s: %s", username, _afe
+            )
 
     # ── RICH OUTPUT METRICS ──────────────────────────────────────────────────
     support_count = best_prototype.support_count if best_prototype else 0

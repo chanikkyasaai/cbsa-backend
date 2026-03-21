@@ -30,8 +30,9 @@ All Layer-2 and Layer-4 outputs are captured in a single log record:
         "decision":                 str,
         "consecutive_risk":         int,
         "consecutive_uncertain":    int,
-        "layer3_used":              bool,
-        "gat_augmented":            bool,
+        "escalation_requested":     bool,   # trust engine raised escalation flag
+        "layer3_used":              bool,   # GAT actually ran and score was valid
+        "gat_augmented":            bool,   # trust score was re-computed with GAT
     }
 
 Usage:
@@ -113,7 +114,8 @@ class StructuredLogger:
             "decision": trust_result.decision,
             "consecutive_risk": trust_result.consecutive_risk,
             "consecutive_uncertain": trust_result.consecutive_uncertain,
-            "layer3_used": trust_result.escalate_to_layer3,
+            "escalation_requested": trust_result.escalate_to_layer3,
+            "layer3_used": trust_result.gat_augmented,
             "gat_augmented": trust_result.gat_augmented,
         }
 
@@ -136,7 +138,7 @@ class StructuredLogger:
                 trust=trust_result.trust_score,
                 decision=trust_result.decision,
                 prototype_id=proto_metrics.matched_prototype_id,
-                layer3_used=trust_result.escalate_to_layer3,
+                layer3_used=trust_result.gat_augmented,
             )
         except Exception as exc:
             logger.error("structured_logger: failed to persist event log: %s", exc)
