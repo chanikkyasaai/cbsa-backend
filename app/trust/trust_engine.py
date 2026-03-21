@@ -108,18 +108,19 @@ Rationale:
 
 Decision Zones
 --------------
-    SAFE      : T_t > theta_safe  (default: 0.65)
+    SAFE      : T_t > theta_safe  (default: 0.80)
     UNCERTAIN : theta_risk <= T_t <= theta_safe
     RISK      : T_t < theta_risk  (default: 0.40)
 
-The gap between 0.65 and 0.40 is the uncertainty zone — not normal, not
+The gap between 0.80 and 0.40 is the uncertainty zone — not normal, not
 definitively risky. This zone triggers Layer-3 escalation (see below).
 
 Threshold Justification:
-  - theta_safe = 0.65: At this trust level, the raw signal R_t would need
-    to be approximately 0.65 consistently. With sim≥0.9, stab≥0.8, drift≤0.2:
-    R_t ≈ 0.45*0.9 + 0.25*0.8 + 0.30*0.8 = 0.405 + 0.2 + 0.24 = 0.845
-    After EMA smoothing from 0.5: trust reaches 0.65 in ~3-4 events.
+  - theta_safe = 0.80: Requires sustained strong behavioral match before
+    granting SAFE status. At R_t=0.85 consistently, EMA reaches 0.80 in
+    ~5-6 events from neutral (0.5). Impostors with R_t in 0.55-0.70 range
+    remain in UNCERTAIN throughout, keeping consecutive_uncertain climbing
+    and ensuring repeated GAT escalation every T_RECHECK seconds.
   - theta_risk = 0.40: At this level, trust has been consistently low.
     Multiple consecutive low R_t values drag T below 0.40.
   - These defaults can be adapted per-user based on historical trust distributions.
@@ -138,14 +139,16 @@ The event-driven escalation is:
 Escalation triggers (ANY of):
   1. decision == "RISK"
      -> Trust has collapsed: immediate deep analysis required
-  2. decision == "UNCERTAIN" AND anomaly_indicator > 0.40
+  2. decision == "UNCERTAIN" AND anomaly_indicator > 0.25
      -> Uncertain zone with elevated anomaly: potential threat
+     -> Threshold lowered from 0.40: careful impostors reach 0.22-0.28
   3. consecutive_uncertain >= 3
      -> Sustained uncertainty: system cannot resolve without deep analysis
 
 Escalation suppression:
-  - Re-check interval T_RECHECK = 30s: prevent GAT from running on every event
-    when trust fluctuates near the boundary. Allows a stable determination.
+  - Re-check interval T_RECHECK = 15s: prevent GAT from running on every event
+    when trust fluctuates near the boundary. Reduced from 30s to improve
+    responsiveness to sustained impostor sessions.
 
 This event-driven approach ensures:
   - Low compute when trust is stable (SAFE)
@@ -206,14 +209,18 @@ def _adaptive_kappa(trust_score: float) -> float:
 
 # ── Decision zone thresholds ──────────────────────────────────────────────────
 
-THETA_SAFE_DEFAULT: float = 0.65    # Trust > this: SAFE
+THETA_SAFE_DEFAULT: float = 0.80    # Trust > this: SAFE (aligned with architecture doc)
 THETA_RISK_DEFAULT: float = 0.40    # Trust < this: RISK
 
 # ── Escalation parameters ─────────────────────────────────────────────────────
 
-ANOMALY_ESCALATION_THRESHOLD: float = 0.40   # anomaly_indicator threshold for escalation
+ANOMALY_ESCALATION_THRESHOLD: float = 0.25   # anomaly_indicator threshold for escalation
+                                              # Lowered from 0.40: careful impostors produce
+                                              # anomaly in 0.22-0.28 range; 0.40 was unreachable
 N_UNCERTAIN_ESCALATION: int = 3              # consecutive UNCERTAIN events before escalation
-T_RECHECK_SECONDS: float = 30.0             # Minimum seconds between GAT invocations
+T_RECHECK_SECONDS: float = 15.0             # Minimum seconds between GAT invocations
+                                             # Reduced from 30s: at ~1 event/s, 30s = 30 events
+                                             # of suppression; 15s balances responsiveness vs cost
 
 # Minimum Layer-3 session-window size required before GAT can be invoked.
 # Callers (e.g. main.py) enforce this prerequisite before calling GAT.
