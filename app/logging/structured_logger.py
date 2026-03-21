@@ -52,6 +52,8 @@ import json
 import logging
 from typing import Optional
 
+import numpy as np
+
 from app.models.prototype import PrototypeMetrics
 from app.trust.trust_engine import TrustResult
 
@@ -124,18 +126,16 @@ class StructuredLogger:
             store.log_behaviour_event(
                 username=username,
                 session_id=session_id,
-                event_timestamp=event_timestamp,
+                timestamp=event_timestamp,
                 event_type=event_type,
-                similarity_score=proto_metrics.similarity_score,
+                vector=proto_metrics.preprocessed.vector if hasattr(proto_metrics, 'preprocessed') else np.zeros(48),
+                similarity=proto_metrics.similarity_score,
                 short_drift=proto_metrics.short_drift,
                 long_drift=proto_metrics.long_drift,
-                stability_score=proto_metrics.stability_score,
-                behavioural_consistency=proto_metrics.behavioural_consistency,
-                prototype_confidence=proto_metrics.prototype_confidence,
-                anomaly_indicator=proto_metrics.anomaly_indicator,
-                trust_score=trust_result.trust_score,
+                stability=proto_metrics.stability_score,
+                trust=trust_result.trust_score,
                 decision=trust_result.decision,
-                matched_prototype_id=proto_metrics.matched_prototype_id,
+                prototype_id=proto_metrics.matched_prototype_id,
                 layer3_used=trust_result.escalate_to_layer3,
             )
         except Exception as exc:
