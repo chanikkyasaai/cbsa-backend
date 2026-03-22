@@ -510,22 +510,26 @@ async def websocket_behaviour_endpoint(websocket: WebSocket):
                                     session_id, session_window
                                 )
                                 _raw_gat = gat_result.get("similarity_score")
-                                # Task 7: validate GAT output before use — no fallback randoms
+                                # GAT returns cosine similarity in [-1, 1].
+                                # Map to [0, 1] so the trust engine can consume it:
+                                #   score =  1.0 → perfect match  → gat_similarity = 1.0
+                                #   score =  0.0 → orthogonal     → gat_similarity = 0.5
+                                #   score = -0.06 → near-opposite → gat_similarity ≈ 0.47 (pulling trust down)
                                 if (
                                     _raw_gat is not None
                                     and isinstance(_raw_gat, (int, float))
-                                    and 0.0 <= float(_raw_gat) <= 1.0
+                                    and -1.0 <= float(_raw_gat) <= 1.0
                                 ):
-                                    gat_similarity = float(_raw_gat)
+                                    gat_similarity = (float(_raw_gat) + 1.0) / 2.0  # maps [-1,1] → [0,1]
                                     logger.info(
-                                        "GAT layer3 result: session=%s gat_score=%.4f",
-                                        session_id, gat_similarity,
+                                        "GAT layer3 result: session=%s raw_cosine=%.4f gat_similarity=%.4f",
+                                        session_id, float(_raw_gat), gat_similarity,
                                     )
                                 else:
                                     gat_similarity = None
                                     if _raw_gat is not None:
                                         logger.warning(
-                                            "GAT returned invalid score %s for session %s — ignored",
+                                            "GAT returned out-of-range score %s for session %s — ignored",
                                             _raw_gat, session_id,
                                         )
                                 # Re-run trust update with GAT augmentation
